@@ -1,25 +1,24 @@
 module.exports = {
 	name: "messageCreate",
-	async execute(client, message) {
-		// Ignore messages from bots
-		if (message.author.bot) return;
+	async execute(client,prefix , message) {
+		if (!message.guild || !message.content || message.author.bot) return;
+		//If the message does not start with the prefix or if the message is from a bot, return
+		if (!message.content.startsWith(prefix)) return;
 
-		// Ignore messages that do not start with the prefix
-		if (!message.content.startsWith(client.prefix)) return;
-
-		// Split the message into command and arguments
-		const args = message.content.slice(client.prefix.length).trim().split(/ +/);
+		//Split the message into arguments
+		const args = message.content.slice(prefix.length).trim().split(/ +/);
 		const commandName = args.shift().toLowerCase();
 
-		// Check if the command exists in the collection
-		const command = client.commands.get(commandName);
-		if (!command) return;
+		//Check if the command exists in the collection
+		if (!client.commands.has(commandName)) return;
 
-		// Execute the command
+		const command = client.commands.get(commandName);
+
 		try {
-			await command.execute(client, message, args);
+			command.execute(message, args);
 		} catch (error) {
-			console.error(`Error executing command ${commandName}:`, error);
+			console.error(error);
 			message.reply("There was an error trying to execute that command!");
 		}
-	}
+	},
+};

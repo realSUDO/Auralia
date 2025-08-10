@@ -15,35 +15,36 @@ const client = new Discord.Client({
 	],
 });
 
+client.prefix = prefix; // This will hold the prefix for the bot commands
 client.commands = new Discord.Collection(); // This will hold the commands collection
 client.queueMap = new Map(); // This will hold the queue for each server
 
 
 //Reading the commands folder and loading the commands
-const commandFiles = fs
-	.readdirSync("./commands")
-	.filter((file) => file.endsWith(".js"));
+	const commandFiles = fs
+		.readdirSync("./commands")
+		.filter((file) => file.endsWith(".js"));
 
-//Dynamically loading the each command file into the commands collection
+	//Dynamically loading the each command file into the commands collection
 
-for (const file of commandFiles) {
-	const command = require(`./commands/${file}`);
-	client.commands.set(command.name, command);
-} // This makes it easy to run a command by name without using a bunch of if statements
+	for (const file of commandFiles) {
+		const command = require(`./commands/${file}`);
+		client.commands.set(command.name, command);
+	} // This makes it easy to run a command by name without using a bunch of if statements
 
 // Load all the events dynamically from the events folder
 const eventFiles = fs.readdirSync("./events").filter(f => f.endsWith(".js"));
-for (const file of eventFiles) {
-	const event = require(`./events/${file}`);
-	if (event.once) {
-		client.once(event.name, (...args) => event.execute(client, ...args));
-	}
-	else {
-		client.on(event.name, (...args) => event.execute(client, ...args));
-	}
+	for (const file of eventFiles) {
+		const event = require(`./events/${file}`);
+		if (event.once) {
+			client.once(event.name, (...args) => event.execute(client, ...args));
+		}
+		else {
+			client.on(event.name, (...args) => event.execute(client, prefix ,  ...args));
+		}
+}
 
 	//Login to Discord with the bot token
-	client
-		.login(token)
+	client.login(token)
 		.then(() => console.log("Bot is logged in successfully!"))
 		.catch((err) => console.error("Failed to log in:", err));
