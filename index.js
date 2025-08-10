@@ -37,10 +37,10 @@ const eventFiles = fs.readdirSync("./events").filter(f => f.endsWith(".js"));
 	for (const file of eventFiles) {
 		const event = require(`./events/${file}`);
 		if (event.once) {
-			client.once(event.name, (...args) => event.execute(client, ...args));
+			client.once(event.name, (...args) => event.execute( ...args,client )); // If the event is a one-time event, use client.once
 		}
 		else {
-			client.on(event.name, (...args) => event.execute(client, prefix ,  ...args));
+			client.on(event.name, (...args) => event.execute( ...args,client )); // If the event is a recurring event, use client.on
 		}
 }
 

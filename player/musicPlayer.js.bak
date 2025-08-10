@@ -1,0 +1,131 @@
+const {
+	joinVoiceChannel,
+	createAudioPlayer,
+	createAudioResource,
+	AudioPlayerStatus,
+	VoiceConnectionStatus,
+	entersState,
+} = require("@discordjs/voice");
+const ytdl = require("ytdl-core");
+const queueMap = new Map(); // This will hold the queue for each server
+async function enqueueTrack(guildId, track, client, textChannel) {
+	let queue = queueMap.get(guildId);
+	if (!queue) {
+		queue = {
+			connection: null,
+			player: null,
+			voiceChannel: null,
+			textChannel: textChannel || null,
+			tracks: [],
+			playing: false,
+		};
+		queueMap.set(guildId, queue);
+	} else queue.textChannel = textChannel || queue.textChannel;
+	queue.tracks.push(track);
+
+	if (!queue.playing) {
+		queue.playing = true;
+		try {
+			await startPlaying(guildId, client);
+		} catch (error) {
+			console.error(error);
+			queue.playing = false;
+			queue.tracks = [];
+		}
+	}
+}
+
+async function startPlaying(guildId, client) {
+	const queue = queueMap.get(guildId);
+	if (!queue) return;
+
+	//get first track
+	const track = queue.tracks[0];
+
+	if (!track) {
+		if (queue.connection) {
+			queue.connection.destroy();
+			queueMap.delete(guildId);
+		}
+		return;
+	}
+	// Join the voice channel if not already connected
+	if (!queue.connection) {
+		const guild = client.guilds.cache.get(guildId);
+		if (!guild) return;
+
+		const member = guild.members.cache.get(track.requester.id);
+		if (!member || !member.voice.channel) {
+			queue.textChannel.send(
+				"You need to be in a voice channel to play music!",
+			);
+			return;
+		}
+		queue.voiceChannel = member.voice.channel;
+		queue.connection = joinVoiceChannel({
+			channelId: queue.voiceChannel.id,
+			guildId: guildId,
+			adapterCreator: guild.voiceAdapterCreator,
+		});
+
+		queue.player = createAudioPlayer();
+		queue.connection.subscribe(queue.player);
+		queue.player.on(AudioPlayerStatus.Idle, () => {
+			queue.tracks.shift(); // Remove the track that just finished
+			if (queue.tracks.length > 0) {
+				startPlaying(guildId, client); // Start the next track
+			} else {
+				queue.playing = false; // No more tracks to play
+				if (queue.connection && !queue.connection.destroyed) {
+					queue.connection.destroy(); // Disconnect from voice channel
+				}
+				queueMap.delete(guildId); // Clear the queue
+			}
+		});
+
+		queue.player.on("error", (error) => {
+			console.error(`Error: ${error.message} with resource`);
+			queue.tracks.shift();
+			if (queue.tracks.length > 0) {
+				startPlaying(guildId, client);
+			} else {
+				queue.playing = false;
+				if (queue.connection && !queue.connection.destroyed) {
+					queue.connection.destroy(); // Disconnect from voice channel
+				}
+				queueMap.delete(guildId);
+			}
+		});
+	}
+	// Prepare resource using ytdl-core stream
+	const stream = ytdl(track.url, {
+		filter: "audioonly",
+		quality: "highestaudio",
+		highWaterMark: 1 << 25,
+	});
+
+	stream.on("error", (error) => {
+		console.error(`Error: ${error.message} with stream`);
+		queue.textChannel?.send(
+			`❌ Error playing track: **${track.title}**. It might be unavailable or removed.`,
+		);
+		queue.tracks.shift(); //remove the track that caused the error
+     });
+
+
+	const resource = createAudioResource(stream);
+
+	queue.player.play(resource);
+
+	// Send now playing message
+	if (queue.textChannel) {
+		queue.textChannel?.send(
+			`🎶 Now playing: **${track.title}** (requested by ${track.requester.username})`,
+		);
+	}
+}
+
+module.exports = {
+	enqueueTrack,
+	queueMap,
+};
