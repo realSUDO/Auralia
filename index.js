@@ -15,6 +15,8 @@ const client = new Discord.Client({
 	],
 });
 
+const { authorizeSpotify } = require("./utils/spotify"); // Importing the Spotify authorization function
+
 client.prefix = prefix; // This will hold the prefix for the bot commands
 client.commands = new Discord.Collection(); // This will hold the commands collection
 client.queueMap = new Map(); // This will hold the queue for each server
@@ -46,5 +48,8 @@ const eventFiles = fs.readdirSync("./events").filter(f => f.endsWith(".js"));
 
 	//Login to Discord with the bot token
 	client.login(token)
-		.then(() => console.log("Bot is logged in successfully!"))
+		.then(() => {
+		console.log("Bot is logged in successfully!");
+		authorizeSpotify().catch(console.error) // Authorize Spotify API on startup
+	})
 		.catch((err) => console.error("Failed to log in:", err));

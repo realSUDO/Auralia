@@ -1,166 +1,210 @@
+// player/musicPlayer.js
 const {
-  joinVoiceChannel,
-  createAudioPlayer,
-  createAudioResource,
-  AudioPlayerStatus,
-  VoiceConnectionStatus,
-  entersState,
+	joinVoiceChannel,
+	createAudioPlayer,
+	createAudioResource,
+	AudioPlayerStatus,
+	VoiceConnectionStatus,
+	entersState,
 } = require("@discordjs/voice");
-const ytdl = require("ytdl-core");
+const ytdl = require("@distube/ytdl-core");
 
-// Holds the music queues for each guild
 const queueMap = new Map();
 
+/**
+ * Enqueue a track and start playing if idle
+ */
 async function enqueueTrack(guildId, track, client, textChannel) {
-  let queue = queueMap.get(guildId);
-  if (!queue) {
-    // Initialize a new queue for the guild
-    queue = {
-      connection: null,
-      player: null,
-      voiceChannel: null,
-      textChannel: textChannel || null,  // Store text channel for messages
-      tracks: [],
-      playing: false,
-    };
-    queueMap.set(guildId, queue);
-  } else {
-    // Always update text channel so messages go to the correct place
-    queue.textChannel = textChannel || queue.textChannel;
-  }
-  queue.tracks.push(track);
+	let queue = queueMap.get(guildId);
 
-  // Start playing if not already
-  if (!queue.playing) {
-    queue.playing = true;
-    try {
-      await startPlaying(guildId, client);
-    } catch (error) {
-      console.error("Error starting playback:", error);
-      queue.playing = false;
-      queue.tracks = [];
-    }
-  }
+	if (!queue) {
+		queue = {
+			connection: null,
+			player: null,
+			voiceChannel: null,
+			textChannel: textChannel || null,
+			tracks: [],
+			playing: false,
+			cleanupInProgress: false,
+		};
+		queueMap.set(guildId, queue);
+	} else {
+		queue.textChannel = textChannel || queue.textChannel;
+	}
+
+	queue.tracks.push(track);
+
+	if (!queue.playing) {
+		queue.playing = true;
+		try {
+			await startPlaying(guildId, client);
+		} catch (err) {
+			console.error("Error starting playback:", err);
+			queue.playing = false;
+			queue.tracks = [];
+		}
+	}
 }
 
+/**
+ * Start playing the first track in the queue
+ */
 async function startPlaying(guildId, client) {
-  const queue = queueMap.get(guildId);
-  if (!queue) return;
+	const queue = queueMap.get(guildId);
+	if (!queue) return;
 
-  const track = queue.tracks[0];
-  if (!track) {
-    // No tracks: clean up voice connection safely
-    if (queue.connection && !queue.connection.destroyed) {
-      queue.connection.destroy();
-    }
-    queueMap.delete(guildId);
-    return;
-  }
+	const track = queue.tracks[0];
+	if (!track) {
+		safeDestroy(queue);
+		queueMap.delete(guildId);
+		return;
+	}
 
-  // Join voice channel if no active connection
-  if (!queue.connection) {
-    const guild = client.guilds.cache.get(guildId);
-    if (!guild) return;
+	// Reset cleanup flag before starting this track
+	queue.cleanupInProgress = false;
 
-    const member = guild.members.cache.get(track.requester.id);
-    if (!member || !member.voice.channel) {
-      // Inform user if they're not in a voice channel
-      queue.textChannel?.send("You need to be in a voice channel to play music!");
-      return;
-    }
+	// If no active voice connection, join and setup the player
+	if (!queue.connection) {
+		const guild = client.guilds.cache.get(guildId);
+		if (!guild) return;
 
-    queue.voiceChannel = member.voice.channel;
-    queue.connection = joinVoiceChannel({
-      channelId: queue.voiceChannel.id,
-      guildId: guildId,
-      adapterCreator: guild.voiceAdapterCreator,
-    });
+		const member = guild.members.cache.get(track.requester.id);
+		if (!member || !member.voice.channel) {
+			queue.textChannel?.send(
+				"You need to be in a voice channel to play music!",
+			);
+			return;
+		}
 
-    // WAIT for voice connection to become ready, or abort
-    try {
-      await entersState(queue.connection, VoiceConnectionStatus.Ready, 15_000);
-    } catch (error) {
-      queue.textChannel?.send("Failed to join voice channel.");
-      queue.connection?.destroy();
-      queueMap.delete(guildId);
-      return;
-    }
+		queue.voiceChannel = member.voice.channel;
+		queue.connection = joinVoiceChannel({
+			channelId: queue.voiceChannel.id,
+			guildId,
+			adapterCreator: guild.voiceAdapterCreator,
+		});
 
-    // Create audio player and subscribe to the connection
-    queue.player = createAudioPlayer();
-    queue.connection.subscribe(queue.player);
+		try {
+			await entersState(queue.connection, VoiceConnectionStatus.Ready, 15_000);
+		} catch {
+			queue.textChannel?.send("Failed to join voice channel.");
+			safeDestroy(queue);
+			queueMap.delete(guildId);
+			return;
+		}
 
-    // Handle track end to play next track or disconnect
-    queue.player.on(AudioPlayerStatus.Idle, () => {
-      // Remove the track that just finished
-      queue.tracks.shift();
-      if (queue.tracks.length > 0) {
-        // Play next track
-        startPlaying(guildId, client);
-      } else {
-        // No more tracks, stop playing and disconnect
-        queue.playing = false;
-        if (queue.connection && !queue.connection.destroyed) {
-          queue.connection.destroy();
-        }
-        queueMap.delete(guildId);
-      }
-    });
+		// Create a fresh player and remove old listeners if reusing
+		if (queue.player) {
+			queue.player.removeAllListeners();
+		}
+		queue.player = createAudioPlayer();
+		queue.connection.subscribe(queue.player);
 
-    // Handle audio player errors gracefully
-    queue.player.on("error", (error) => {
-      console.error(`Player error: ${error.message}`);
-      queue.tracks.shift(); // Skip problematic track
-      if (queue.tracks.length > 0) {
-        startPlaying(guildId, client);
-      } else {
-        queue.playing = false;
-        if (queue.connection && !queue.connection.destroyed) {
-          queue.connection.destroy();
-        }
-        queueMap.delete(guildId);
-      }
-    });
-  }
+		// Attach player events ONCE
+		queue.player.on(AudioPlayerStatus.Idle, () => {
+			queue.tracks.shift();
+			if (queue.tracks.length > 0) {
+				startPlaying(guildId, client);
+			} else {
+				queue.playing = false;
+				safeDestroy(queue);
+				queueMap.delete(guildId);
+			}
+		});
 
-  // Create a stream from YouTube using ytdl-core and listen for errors
-  const stream = ytdl(track.url, {
-    filter: "audioonly",
-    quality: "highestaudio",
-    highWaterMark: 1 << 25, // Improves stream buffering
-  });
+		queue.player.on("error", (error) => {
+			if (queue.cleanupInProgress) return;
+			queue.cleanupInProgress = true;
 
-  stream.on("error", (error) => {
-    console.error("ytdl stream error:", error);
-    queue.textChannel?.send(
-      `❌ Error playing track: **${track.title}**. It might be unavailable or removed.`
-    );
-    // Remove the faulty track and attempt next
-    queue.tracks.shift();
-    if (queue.tracks.length > 0) {
-      startPlaying(guildId, client);
-    } else {
-      queue.playing = false;
-      if (queue.connection && !queue.connection.destroyed) {
-        queue.connection.destroy();
-      }
-      queueMap.delete(guildId);
-    }
-  });
+			console.error(`Player error: ${error.message}`);
 
-  // Create audio resource from the stream and start playback
-  const resource = createAudioResource(stream);
+			if (
+				error.message.includes("Sign in to confirm your age") ||
+				error.message.includes("UnrecoverableError")
+			) {
+				queue.textChannel?.send(
+					`⚠ Skipping track **${queue.tracks[0]?.title || "Unknown"}** — age restricted/blocked.`,
+				);
+			} else {
+				queue.textChannel?.send(
+					`⚠ Skipping track **${queue.tracks[0]?.title || "Unknown"}** due to playback error.`,
+				);
+			}
 
-  queue.player.play(resource);
+			skipTrack(queue, guildId, client);
+		});
+	}
 
-  // Announce now playing
-  queue.textChannel?.send(
-    `🎶 Now playing: **${track.title}** (requested by ${track.requester.username})`
-  );
+	// Create a new stream for the current track
+	let stream;
+	try {
+		stream = ytdl(track.url, {
+			filter: "audioonly",
+			quality: "highestaudio",
+			format: "251",
+			highWaterMark: 1 << 25,
+		});
+	} catch {
+		queue.textChannel?.send(`❌ Error loading **${track.title}**, skipping...`);
+		skipTrack(queue, guildId, client);
+		return;
+	}
+
+	// Only run the stream's error handler once
+	stream.once("error", (error) => {
+		if (queue.cleanupInProgress) return;
+		queue.cleanupInProgress = true;
+
+		console.error("ytdl stream error:", error);
+
+		if (
+			error.message.includes("Sign in to confirm your age") ||
+			error.message.includes("UnrecoverableError")
+		) {
+			queue.textChannel?.send(
+				`⚠ Skipping track **${queue.tracks[0]?.title || "Unknown"}** — age restricted/blocked.`,
+			);
+		} else {
+			queue.textChannel?.send(
+				`❌ Stream error on track **${queue.tracks[0]?.title || "Unknown"}**, skipping.`,
+			);
+		}
+
+		skipTrack(queue, guildId, client);
+	});
+
+	const resource = createAudioResource(stream);
+	queue.player.play(resource);
+
+	queue.textChannel?.send(
+		`🎶 Now playing: **${track.title}** (requested by ${track.requester.username})`,
+	);
+}
+
+/**
+ * Skip current track and continue or clean up
+ */
+function skipTrack(queue, guildId, client) {
+	queue.tracks.shift();
+	if (queue.tracks.length > 0) {
+		queue.cleanupInProgress = false; // Reset for next track
+		startPlaying(guildId, client);
+	} else {
+		queue.playing = false;
+		safeDestroy(queue);
+		queueMap.delete(guildId);
+	}
+}
+
+/**
+ * Safely destroy voice connection
+ */
+function safeDestroy(queue) {
+	if (queue.connection && !queue.connection.destroyed) {
+		queue.connection.destroy();
+	}
 }
 
 module.exports = {
-  enqueueTrack,
-  queueMap,
+	enqueueTrack,
+	queueMap,
 };
-
