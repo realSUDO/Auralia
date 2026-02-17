@@ -7,7 +7,7 @@ const {
 	VoiceConnectionStatus,
 	entersState,
 } = require("@discordjs/voice");
-const ytdl = require("@distube/ytdl-core");
+const youtubedl = require("youtube-dl-exec");
 
 const queueMap = new Map();
 
@@ -59,6 +59,8 @@ async function startPlaying(guildId, client) {
 		queueMap.delete(guildId);
 		return;
 	}
+
+	console.log("Track URL:", track.url);
 
 	// Reset cleanup flag before starting this track
 	queue.cleanupInProgress = false;
@@ -137,13 +139,20 @@ async function startPlaying(guildId, client) {
 	// Create a new stream for the current track
 	let stream;
 	try {
-		stream = ytdl(track.url, {
-			filter: "audioonly",
-			quality: "highestaudio",
-			format: "251",
-			highWaterMark: 1 << 25,
+		const { spawn } = require('child_process');
+		const ytdlp = spawn('yt-dlp', [
+			'-f', 'bestaudio',
+			'-o', '-',
+			'--no-playlist',
+			track.url
+		]);
+		stream = ytdlp.stdout;
+		
+		ytdlp.stderr.on('data', (data) => {
+			console.error('yt-dlp stderr:', data.toString());
 		});
-	} catch {
+	} catch (error) {
+		console.error("ytdl stream error:", error);
 		queue.textChannel?.send(`❌ Error loading **${track.title}**, skipping...`);
 		skipTrack(queue, guildId, client);
 		return;
@@ -199,8 +208,14 @@ function skipTrack(queue, guildId, client) {
  * Safely destroy voice connection
  */
 function safeDestroy(queue) {
-	if (queue.connection && !queue.connection.destroyed) {
-		queue.connection.destroy();
+	if (queue.connection) {
+		try {
+			if (queue.connection.state.status !== 'destroyed') {
+				queue.connection.destroy();
+			}
+		} catch (e) {
+			// Already destroyed
+		}
 	}
 }
 
