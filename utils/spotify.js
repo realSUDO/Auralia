@@ -20,9 +20,11 @@ async function authorizeSpotify() {
     spotifyReady = true;
     console.log('Spotify API authorized successfully');
 
-    // Refresh 60 seconds before expiry, minimum 1 second
+    // Refresh before expiry - if token expires in less than 60s, refresh at 50% of remaining time
     const expiresIn = data.body.expires_in || 3600;
-    const refreshInterval = Math.max(expiresIn - 60, 1) * 1000;
+    const refreshInterval = expiresIn < 60 
+      ? Math.max(Math.floor(expiresIn * 0.5), 1) * 1000
+      : (expiresIn - 60) * 1000;
     setTimeout(authorizeSpotify, refreshInterval);
   } catch (error) {
     spotifyReady = false;
@@ -30,8 +32,6 @@ async function authorizeSpotify() {
     setTimeout(authorizeSpotify, 30 * 1000);
   }
 }
-
-
 
 async function getSpotifyTracks(spotifyUrl) {
   if (!spotifyReady) throw new Error('Spotify API not authorized yet');

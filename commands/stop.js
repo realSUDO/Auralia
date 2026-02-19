@@ -1,4 +1,5 @@
 const { stopPlayback } = require("../player/musicPlayer");
+const { createSuccessEmbed, createErrorEmbed } = require("../utils/embeds");
 
 module.exports = {
   name: "stop",
@@ -7,9 +8,9 @@ module.exports = {
     const stopped = stopPlayback(message.guild.id);
     
     if (!stopped) {
-      return message.reply("There's no music playing!");
+      return message.reply({ embeds: [createErrorEmbed("There's no music playing!")] });
     }
 
-    message.channel.send("⏹️ Stopped playback and cleared queue.").catch(() => {});
+    message.channel.send({ embeds: [createSuccessEmbed("Stopped playback and cleared queue.")] }).catch(() => {});
   },
 };

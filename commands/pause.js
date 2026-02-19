@@ -1,5 +1,6 @@
 const { queueMap } = require("../player/musicPlayer");
 const { AudioPlayerStatus } = require("@discordjs/voice");
+const { createSuccessEmbed, createErrorEmbed } = require("../utils/embeds");
 
 module.exports = {
   name: "pause",
@@ -8,17 +9,17 @@ module.exports = {
     const queue = queueMap.get(message.guild.id);
     
     if (!queue || !queue.player) {
-      return message.reply("There's no music playing!");
+      return message.reply({ embeds: [createErrorEmbed("There's no music playing!")] });
     }
 
     if (queue.player.state.status === AudioPlayerStatus.Playing) {
       queue.player.pause();
-      message.channel.send("⏸️ Song paused.");
+      message.channel.send({ embeds: [createSuccessEmbed("Song paused.")] }).catch(() => {});
     } else if (queue.player.state.status === AudioPlayerStatus.Paused) {
       queue.player.unpause();
-      message.channel.send("▶️ Song resumed.");
+      message.channel.send({ embeds: [createSuccessEmbed("Song resumed.")] }).catch(() => {});
     } else {
-      message.reply("Nothing is currently playing!");
+      message.reply({ embeds: [createErrorEmbed("Nothing is currently playing!")] });
     }
   },
 };

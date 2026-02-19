@@ -2,6 +2,7 @@ module.exports = {
 	name : 'ping',
 	description: 'Replies with Pong!',
 	execute(message, args) {
-		message.channel.send('Pong! 🏓'); //bot replies in same channel with Pong!
+		const { createSuccessEmbed } = require("../utils/embeds");
+		message.channel.send({ embeds: [createSuccessEmbed('Pong! 🏓')] });
 	}
 };

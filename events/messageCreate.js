@@ -3,6 +3,7 @@ module.exports = {
 	async execute(message , client) {
 		if (!message.guild || !message.content || message.author.bot) return;
 		
+		const startTime = process.hrtime.bigint();
 		console.log(`[${new Date().toLocaleTimeString()}] Message: ${message.content}`);
 		
 		//If the message does not start with the prefix or if the message is from a bot, return
@@ -32,5 +33,9 @@ module.exports = {
 			console.error(error);
 			message.reply("There was an error trying to execute that command!");
 		}
+		
+		const endTime = process.hrtime.bigint();
+		const duration = Number(endTime - startTime) / 1000000; // Convert to ms
+		console.log(`[${new Date().toLocaleTimeString()}] Command handler took: ${duration.toFixed(2)}ms`);
 	},
 }
