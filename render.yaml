@@ -1,0 +1,5 @@
+services:
+  - type: web
+    name: auralia-bot
+    env: docker
+    dockerfilePath: ./Dockerfile
