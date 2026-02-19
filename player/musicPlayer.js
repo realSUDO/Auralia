@@ -14,7 +14,9 @@ const queueMap = new Map();
 /**
  * Enqueue a track and start playing if idle
  */
-async function enqueueTrack(guildId, track, client, textChannel) {
+function enqueueTrack(guildId, track, client, textChannel) {
+	console.log(`[${new Date().toLocaleTimeString()}] Enqueuing track: ${track.title}`);
+	
 	let queue = queueMap.get(guildId);
 
 	if (!queue) {
@@ -26,6 +28,9 @@ async function enqueueTrack(guildId, track, client, textChannel) {
 			tracks: [],
 			playing: false,
 			cleanupInProgress: false,
+			intentionalStop: false,
+			currentStream: null,
+			aloneTimer: null,
 		};
 		queueMap.set(guildId, queue);
 	} else {
@@ -33,16 +38,16 @@ async function enqueueTrack(guildId, track, client, textChannel) {
 	}
 
 	queue.tracks.push(track);
+	console.log(`[${new Date().toLocaleTimeString()}] Queue length: ${queue.tracks.length}`);
 
 	if (!queue.playing) {
 		queue.playing = true;
-		try {
-			await startPlaying(guildId, client);
-		} catch (err) {
+		console.log(`[${new Date().toLocaleTimeString()}] Starting playback...`);
+		startPlaying(guildId, client).catch(err => {
 			console.error("Error starting playback:", err);
 			queue.playing = false;
 			queue.tracks = [];
-		}
+		});
 	}
 }
 
@@ -61,6 +66,7 @@ async function startPlaying(guildId, client) {
 	}
 
 	console.log("Track URL:", track.url);
+	console.log(`[${new Date().toLocaleTimeString()}] Starting to play: ${track.title}`);
 
 	// Reset cleanup flag before starting this track
 	queue.cleanupInProgress = false;
@@ -88,11 +94,14 @@ async function startPlaying(guildId, client) {
 		try {
 			await entersState(queue.connection, VoiceConnectionStatus.Ready, 15_000);
 		} catch {
-			queue.textChannel?.send("Failed to join voice channel.");
+			queue.textChannel?.send("Failed to join voice channel.").catch(() => {});
 			safeDestroy(queue);
 			queueMap.delete(guildId);
 			return;
 		}
+
+		// Start monitoring voice channel for alone status
+		startAloneMonitoring(guildId, client);
 
 		// Create a fresh player and remove old listeners if reusing
 		if (queue.player) {
@@ -103,18 +112,18 @@ async function startPlaying(guildId, client) {
 
 		// Attach player events ONCE
 		queue.player.on(AudioPlayerStatus.Idle, () => {
+			queue.intentionalStop = false;
 			queue.tracks.shift();
 			if (queue.tracks.length > 0) {
 				startPlaying(guildId, client);
 			} else {
 				queue.playing = false;
-				safeDestroy(queue);
-				queueMap.delete(guildId);
+				// Don't leave VC, just stop playing - alone monitoring will handle leaving if needed
 			}
 		});
 
 		queue.player.on("error", (error) => {
-			if (queue.cleanupInProgress) return;
+			if (queue.cleanupInProgress || queue.intentionalStop) return;
 			queue.cleanupInProgress = true;
 
 			console.error(`Player error: ${error.message}`);
@@ -138,55 +147,70 @@ async function startPlaying(guildId, client) {
 
 	// Create a new stream for the current track
 	let stream;
+	let ytdlpProcess;
 	try {
 		const { spawn } = require('child_process');
-		const ytdlp = spawn('yt-dlp', [
+		ytdlpProcess = spawn('yt-dlp', [
 			'-f', 'bestaudio',
 			'-o', '-',
 			'--no-playlist',
+			'--quiet',
 			track.url
 		]);
-		stream = ytdlp.stdout;
+		stream = ytdlpProcess.stdout;
+		queue.currentStream = stream;
 		
-		ytdlp.stderr.on('data', (data) => {
-			console.error('yt-dlp stderr:', data.toString());
+		let streamStarted = false;
+		
+		// Wait for stream to actually start before playing
+		stream.once('readable', () => {
+			if (streamStarted || queue.intentionalStop) return;
+			streamStarted = true;
+			
+			const resource = createAudioResource(stream);
+			queue.player.play(resource);
+			
+			queue.textChannel?.send(
+				`🎶 Now playing: **${track.title}** (requested by ${track.requester.username})`,
+			);
 		});
+		
+		stream.once("error", (error) => {
+			if (queue.cleanupInProgress || queue.intentionalStop || queue.currentStream !== stream) return;
+			queue.cleanupInProgress = true;
+
+			console.error("ytdl stream error:", error.message);
+
+			if (
+				error.message.includes("Sign in to confirm your age") ||
+				error.message.includes("UnrecoverableError")
+			) {
+				queue.textChannel?.send(
+					`⚠ Skipping track **${queue.tracks[0]?.title || "Unknown"}** — age restricted/blocked.`,
+				);
+			} else {
+				queue.textChannel?.send(
+					`❌ Stream error on track **${queue.tracks[0]?.title || "Unknown"}**, skipping.`,
+				);
+			}
+
+			skipTrack(queue, guildId, client);
+		});
+		
+		ytdlpProcess.on('error', (error) => {
+			if (queue.cleanupInProgress || queue.intentionalStop) return;
+			queue.cleanupInProgress = true;
+			console.error("yt-dlp process error:", error.message);
+			queue.textChannel?.send(`❌ Error loading **${track.title}**, skipping...`).catch(() => {});
+			skipTrack(queue, guildId, client);
+		});
+		
 	} catch (error) {
 		console.error("ytdl stream error:", error);
 		queue.textChannel?.send(`❌ Error loading **${track.title}**, skipping...`);
 		skipTrack(queue, guildId, client);
 		return;
 	}
-
-	// Only run the stream's error handler once
-	stream.once("error", (error) => {
-		if (queue.cleanupInProgress) return;
-		queue.cleanupInProgress = true;
-
-		console.error("ytdl stream error:", error);
-
-		if (
-			error.message.includes("Sign in to confirm your age") ||
-			error.message.includes("UnrecoverableError")
-		) {
-			queue.textChannel?.send(
-				`⚠ Skipping track **${queue.tracks[0]?.title || "Unknown"}** — age restricted/blocked.`,
-			);
-		} else {
-			queue.textChannel?.send(
-				`❌ Stream error on track **${queue.tracks[0]?.title || "Unknown"}**, skipping.`,
-			);
-		}
-
-		skipTrack(queue, guildId, client);
-	});
-
-	const resource = createAudioResource(stream);
-	queue.player.play(resource);
-
-	queue.textChannel?.send(
-		`🎶 Now playing: **${track.title}** (requested by ${track.requester.username})`,
-	);
 }
 
 /**
@@ -208,6 +232,10 @@ function skipTrack(queue, guildId, client) {
  * Safely destroy voice connection
  */
 function safeDestroy(queue) {
+	if (queue.aloneTimer) {
+		clearTimeout(queue.aloneTimer);
+		queue.aloneTimer = null;
+	}
 	if (queue.connection) {
 		try {
 			if (queue.connection.state.status !== 'destroyed') {
@@ -219,7 +247,88 @@ function safeDestroy(queue) {
 	}
 }
 
+/**
+ * Monitor if bot is alone in voice channel
+ */
+function startAloneMonitoring(guildId, client) {
+	const queue = queueMap.get(guildId);
+	if (!queue || !queue.voiceChannel) return;
+
+	const checkAlone = () => {
+		const queue = queueMap.get(guildId);
+		if (!queue || !queue.voiceChannel) return;
+
+		const members = queue.voiceChannel.members.filter(m => !m.user.bot);
+		
+		if (members.size === 0) {
+			// Bot is alone, start timer
+			if (!queue.aloneTimer) {
+				queue.aloneTimer = setTimeout(() => {
+					const q = queueMap.get(guildId);
+					if (q) {
+						q.textChannel?.send("⏹️ Left voice channel due to inactivity.").catch(() => {});
+						q.tracks = [];
+						q.playing = false;
+						if (q.player) q.player.stop();
+						safeDestroy(q);
+						queueMap.delete(guildId);
+					}
+				}, 60000); // 1 minute
+			}
+		} else {
+			// Users present, clear timer
+			if (queue.aloneTimer) {
+				clearTimeout(queue.aloneTimer);
+				queue.aloneTimer = null;
+			}
+		}
+	};
+
+	// Check immediately
+	checkAlone();
+
+	// Monitor voice state updates
+	const voiceStateHandler = (oldState, newState) => {
+		if (oldState.channelId === queue.voiceChannel?.id || newState.channelId === queue.voiceChannel?.id) {
+			checkAlone();
+		}
+	};
+
+	client.on('voiceStateUpdate', voiceStateHandler);
+}
+
+/**
+ * Stop playback without leaving
+ */
+function stopPlayback(guildId) {
+	const queue = queueMap.get(guildId);
+	if (!queue) return false;
+
+	console.log(`[${new Date().toLocaleTimeString()}] Stopping playback for guild ${guildId}`);
+	
+	queue.tracks = [];
+	queue.playing = false;
+	queue.intentionalStop = true;
+	queue.cleanupInProgress = true; // Prevent any error handlers from firing
+	
+	if (queue.player) {
+		queue.player.stop();
+	}
+	
+	// Reset flags after a short delay
+	setTimeout(() => {
+		const q = queueMap.get(guildId);
+		if (q && q.intentionalStop) {
+			q.intentionalStop = false;
+			q.cleanupInProgress = false;
+		}
+	}, 500);
+	
+	return true;
+}
+
 module.exports = {
 	enqueueTrack,
 	queueMap,
+	stopPlayback,
 };

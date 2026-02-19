@@ -62,7 +62,7 @@ module.exports = {
               url: video.url,
               requester: message.author,
             };
-            await enqueueTrack(message.guild.id, track, client, message.channel);
+            enqueueTrack(message.guild.id, track, client, message.channel);
           }
 
           return message.channel.send(
@@ -70,15 +70,23 @@ module.exports = {
           );
 
         } else {
-          // Handle YouTube single video URL
-          const info = await ytdl.getInfo(query);
-          const track = {
-            title: info.videoDetails.title,
-            url: query,
-            requester: message.author,
-          };
-          await enqueueTrack(message.guild.id, track, client, message.channel);
-          return message.channel.send(`✅ Added to queue: **${track.title}**`);
+          // Handle YouTube single video URL - completely non-blocking
+          setImmediate(async () => {
+            try {
+              const info = await ytdl.getInfo(query);
+              const track = {
+                title: info.videoDetails.title,
+                url: query,
+                requester: message.author,
+              };
+              enqueueTrack(message.guild.id, track, client, message.channel);
+              message.channel.send(`✅ Added to queue: **${track.title}**`).catch(() => {});
+            } catch (error) {
+              console.error(error);
+              message.channel.send("Could not fetch video info.").catch(() => {});
+            }
+          });
+          return;
         }
 
       } else if (isSpotifyUrl(query)) {
@@ -106,7 +114,7 @@ module.exports = {
               url: searchResult.url,
               requester: message.author,
             };
-            await enqueueTrack(message.guild.id, ytTrack, client, message.channel);
+            enqueueTrack(message.guild.id, ytTrack, client, message.channel);
           }
         }
 
@@ -115,18 +123,31 @@ module.exports = {
         );
 
       } else {
-        // Search term - search YouTube
-        const searchResult = await searchYouTube(query);
-        if (!searchResult) {
-          return message.reply("No results found on YouTube.");
-        }
-        const track = {
-          title: searchResult.title,
-          url: searchResult.url,
-          requester: message.author,
-        };
-        await enqueueTrack(message.guild.id, track, client, message.channel);
-        return message.channel.send(`✅ Added to queue: **${track.title}**`);
+        // Search term - search YouTube (completely non-blocking)
+        console.log(`[${new Date().toLocaleTimeString()}] Deferring YouTube search for: ${query}`);
+        setImmediate(async () => {
+          console.log(`[${new Date().toLocaleTimeString()}] Starting YouTube search for: ${query}`);
+          try {
+            const searchResult = await searchYouTube(query);
+            if (!searchResult) {
+              message.reply("No results found on YouTube.").catch(() => {});
+              return;
+            }
+            console.log(`[${new Date().toLocaleTimeString()}] Found: ${searchResult.title}`);
+            const track = {
+              title: searchResult.title,
+              url: searchResult.url,
+              requester: message.author,
+            };
+            enqueueTrack(message.guild.id, track, client, message.channel);
+            message.channel.send(`✅ Added to queue: **${track.title}**`).catch(() => {});
+          } catch (error) {
+            console.error(error);
+            message.reply("Could not search YouTube.").catch(() => {});
+          }
+        });
+        console.log(`[${new Date().toLocaleTimeString()}] Command returned immediately`);
+        return;
       }
     } catch (error) {
       console.error(error);

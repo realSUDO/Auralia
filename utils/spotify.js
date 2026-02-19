@@ -20,8 +20,9 @@ async function authorizeSpotify() {
     spotifyReady = true;
     console.log('Spotify API authorized successfully');
 
-    // Ensure refresh interval is never negative
-    const refreshInterval = Math.max(data.body.expires_in - 60, 1) * 1000;
+    // Refresh 60 seconds before expiry, minimum 1 second
+    const expiresIn = data.body.expires_in || 3600;
+    const refreshInterval = Math.max(expiresIn - 60, 1) * 1000;
     setTimeout(authorizeSpotify, refreshInterval);
   } catch (error) {
     spotifyReady = false;

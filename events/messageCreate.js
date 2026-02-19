@@ -1,9 +1,10 @@
 module.exports = {
 	name: "messageCreate",
 	async execute(message , client) {
-
-		console.log (`Received message: ${message.content}`);
 		if (!message.guild || !message.content || message.author.bot) return;
+		
+		console.log(`[${new Date().toLocaleTimeString()}] Message: ${message.content}`);
+		
 		//If the message does not start with the prefix or if the message is from a bot, return
 		if (!message.content.startsWith(client.prefix)) return;
 
@@ -15,9 +16,18 @@ module.exports = {
 		if (!client.commands.has(commandName)) return;
 
 		const command = client.commands.get(commandName);
+		
+		console.log(`[${new Date().toLocaleTimeString()}] Executing command: ${commandName}`);
 
 		try {
-			await command.execute(message, args, client);
+			// Execute command without blocking
+			const result = command.execute(message, args, client);
+			if (result && typeof result.catch === 'function') {
+				result.catch(error => {
+					console.error(error);
+					message.reply("There was an error trying to execute that command!");
+				});
+			}
 		} catch (error) {
 			console.error(error);
 			message.reply("There was an error trying to execute that command!");
