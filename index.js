@@ -3,7 +3,8 @@ const fs = require("fs");
 
 //Imorting discord.js so we can interact with the Discord API
 const Discord = require("discord.js");
-const { prefix, token } = require("./config.json"); // Importing the prefix and token from config.json
+const config = require("./config"); // Importing config (supports both env vars and config.json)
+const { prefix, token } = config;
 
 //Creating the bot client
 const client = new Discord.Client({
@@ -53,3 +54,6 @@ const eventFiles = fs.readdirSync("./events").filter(f => f.endsWith(".js"));
 		authorizeSpotify().catch(console.error) // Authorize Spotify API on startup
 	})
 		.catch((err) => console.error("Failed to log in:", err));
+
+// Keep-alive server for Render
+require("http").createServer((req, res) => res.end("Bot is alive!")).listen(process.env.PORT || 3000);
