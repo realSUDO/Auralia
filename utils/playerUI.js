@@ -183,7 +183,7 @@ function startProgressUpdates(queue, track, channel) {
 				}
 			});
 		}
-	}, 10000);
+	}, 1000);
 }
 
 /**

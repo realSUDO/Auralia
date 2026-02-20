@@ -14,6 +14,18 @@ module.exports = {
 
     stopPlayback(message.guild.id);
     
+    // Clear player message
+    if (queue.playerMessage) {
+      queue.playerMessage.delete().catch(() => {});
+      queue.playerMessage = null;
+    }
+    
+    // Clear progress interval
+    if (queue.progressInterval) {
+      clearInterval(queue.progressInterval);
+      queue.progressInterval = null;
+    }
+    
     if (queue.connection) {
       queue.connection.destroy();
     }

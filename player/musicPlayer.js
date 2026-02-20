@@ -218,9 +218,50 @@ async function startPlaying(guildId, client) {
 				console.log(`[${new Date().toLocaleTimeString()}] Queue empty, playback stopped`);
 				cleanupPreload(queue);
 				queue.playing = false;
+				
+				// Clear player message when queue is empty
+				if (queue.playerMessage) {
+					queue.playerMessage.delete().catch(() => {});
+					queue.playerMessage = null;
+				}
+				
 				const { createSuccessEmbed } = require("../utils/embeds");
 				queue.textChannel?.send({ embeds: [createSuccessEmbed("All songs played.")] }).catch(() => {});
-				// Don't leave VC, just stop playing - alone monitoring will handle leaving if needed
+				
+				// Trigger inactivity check
+				const checkAlone = () => {
+					const q = queueMap.get(guildId);
+					if (!q || !q.voiceChannel) return;
+					
+					const isInactive = !q.playing || q.tracks.length === 0;
+					
+					if (isInactive && !q.aloneTimer) {
+						q.aloneTimer = setTimeout(() => {
+							const queue = queueMap.get(guildId);
+							if (queue) {
+								const { createInfoEmbed } = require("../utils/embeds");
+								queue.textChannel?.send({ embeds: [createInfoEmbed("Left voice channel due to inactivity.")] }).catch(() => {});
+								
+								if (queue.playerMessage) {
+									queue.playerMessage.delete().catch(() => {});
+									queue.playerMessage = null;
+								}
+								
+								if (queue.progressInterval) {
+									clearInterval(queue.progressInterval);
+									queue.progressInterval = null;
+								}
+								
+								queue.tracks = [];
+								queue.playing = false;
+								if (queue.player) queue.player.stop();
+								safeDestroy(queue);
+								queueMap.delete(guildId);
+							}
+						}, 60000);
+					}
+				};
+				checkAlone();
 			}
 		});
 		
@@ -436,7 +477,7 @@ function safeDestroy(queue) {
 }
 
 /**
- * Monitor if bot is alone in voice channel
+ * Monitor if bot is alone in voice channel or inactive
  */
 function startAloneMonitoring(guildId, client) {
 	const queue = queueMap.get(guildId);
@@ -447,15 +488,29 @@ function startAloneMonitoring(guildId, client) {
 		if (!queue || !queue.voiceChannel) return;
 
 		const members = queue.voiceChannel.members.filter(m => !m.user.bot);
+		const isInactive = !queue.playing || queue.tracks.length === 0;
 		
-		if (members.size === 0) {
-			// Bot is alone, start timer
+		if (members.size === 0 || isInactive) {
+			// Bot is alone or inactive, start timer
 			if (!queue.aloneTimer) {
 				queue.aloneTimer = setTimeout(() => {
 					const q = queueMap.get(guildId);
 					if (q) {
 						const { createInfoEmbed } = require("../utils/embeds");
 						q.textChannel?.send({ embeds: [createInfoEmbed("Left voice channel due to inactivity.")] }).catch(() => {});
+						
+						// Clear player message
+						if (q.playerMessage) {
+							q.playerMessage.delete().catch(() => {});
+							q.playerMessage = null;
+						}
+						
+						// Clear progress interval
+						if (q.progressInterval) {
+							clearInterval(q.progressInterval);
+							q.progressInterval = null;
+						}
+						
 						q.tracks = [];
 						q.playing = false;
 						if (q.player) q.player.stop();
@@ -465,7 +520,7 @@ function startAloneMonitoring(guildId, client) {
 				}, 60000); // 1 minute
 			}
 		} else {
-			// Users present, clear timer
+			// Users present and playing, clear timer
 			if (queue.aloneTimer) {
 				clearTimeout(queue.aloneTimer);
 				queue.aloneTimer = null;
