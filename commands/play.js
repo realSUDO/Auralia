@@ -76,10 +76,21 @@ module.exports = {
             // Handle YouTube single video URL
             try {
               const info = await ytdl.getInfo(query);
+              
+              // Check video length (> 30 minutes)
+              const durationSeconds = parseInt(info.videoDetails.lengthSeconds) || 0;
+              const durationMinutes = durationSeconds / 60;
+              
+              if (durationMinutes > 30) {
+                const { createErrorEmbed } = require("../utils/embeds");
+                return message.reply({ embeds: [createErrorEmbed("This is not even a song bruh! 😂")] }).catch(() => {});
+              }
+              
               const track = {
                 title: info.videoDetails.title,
                 url: query,
                 requester: message.author,
+                duration: durationSeconds,
               };
               enqueueTrack(message.guild.id, track, client, message.channel);
               const { createSuccessEmbed } = require("../utils/embeds");
@@ -133,10 +144,26 @@ module.exports = {
               return;
             }
             console.log(`[${new Date().toLocaleTimeString()}] Found: ${searchResult.title}`);
+            
+            // Check video length
+            const durationMinutes = (searchResult.seconds || 0) / 60;
+            if (durationMinutes > 30) {
+              const { createErrorEmbed } = require("../utils/embeds");
+              message.reply({ embeds: [createErrorEmbed("This is not even a song bruh! 😂")] }).catch(() => {});
+              return;
+            }
+            
+            if (durationMinutes > 15) {
+              const { createWarningEmbed } = require("../utils/embeds");
+              message.reply({ embeds: [createWarningEmbed("Song too long to play ⚠️\nUse `!play <url>` to force play this video.")] }).catch(() => {});
+              return;
+            }
+            
             const track = {
               title: searchResult.title,
               url: searchResult.url,
               requester: message.author,
+              duration: searchResult.seconds || 0,
             };
             enqueueTrack(message.guild.id, track, client, message.channel);
             const { createSuccessEmbed } = require("../utils/embeds");

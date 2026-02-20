@@ -10,35 +10,93 @@ if (!fs.existsSync(CACHE_DIR)) {
 }
 
 /**
- * Preload next track in queue
+ * Preload current track (for instant replay/seek)
  */
-function preloadNextTrack(guildId, nextTrack, queue) {
-	if (!nextTrack) return;
+function preloadCurrentTrack(guildId, currentTrack, queue) {
+	if (!currentTrack) return;
 
-	// Cancel existing preload if any
-	if (queue.preloadProcess) {
-		queue.preloadProcess.kill();
-		queue.preloadProcess = null;
+	// Cancel existing current preload if any
+	if (queue.preloadCurrentProcess) {
+		queue.preloadCurrentProcess.kill();
+		queue.preloadCurrentProcess = null;
 	}
 
-	// Clean up old preloaded file (async to not block)
-	if (queue.preloadedTrack && queue.preloadedTrack.url !== nextTrack.url) {
-		const oldFile = queue.preloadedTrack.filePath;
-		queue.preloadedTrack = null;
+	// Clean up old preloaded current file (async to not block)
+	if (queue.preloadedCurrent && queue.preloadedCurrent.url !== currentTrack.url) {
+		const oldFile = queue.preloadedCurrent.filePath;
+		queue.preloadedCurrent = null;
 		fs.unlink(oldFile, (err) => {
 			if (err && err.code !== 'ENOENT') {
-				console.error("Error cleaning preload:", err.message);
+				console.error("Error cleaning current preload:", err.message);
 			}
 		});
 	}
 
 	// Skip if already preloaded
-	if (queue.preloadedTrack && queue.preloadedTrack.url === nextTrack.url) {
+	if (queue.preloadedCurrent && queue.preloadedCurrent.url === currentTrack.url) {
+		return;
+	}
+
+	const filePath = path.join(CACHE_DIR, `${guildId}_current.webm`);
+	console.log(`[${new Date().toLocaleTimeString()}] Preloading current: ${currentTrack.title}`);
+
+	const ytdlp = spawn('yt-dlp', [
+		'-f', 'bestaudio',
+		'-o', filePath,
+		'--no-playlist',
+		'--quiet',
+		currentTrack.url
+	]);
+
+	queue.preloadCurrentProcess = ytdlp;
+
+	ytdlp.on('close', (code) => {
+		if (code === 0 && fs.existsSync(filePath)) {
+			queue.preloadedCurrent = {
+				url: currentTrack.url,
+				filePath: filePath,
+			};
+			console.log(`[${new Date().toLocaleTimeString()}] Preloaded current: ${currentTrack.title}`);
+		}
+		queue.preloadCurrentProcess = null;
+	});
+
+	ytdlp.on('error', (error) => {
+		console.error("Current preload error:", error.message);
+		queue.preloadCurrentProcess = null;
+	});
+}
+
+/**
+ * Preload next track in queue
+ */
+function preloadNextTrack(guildId, nextTrack, queue) {
+	if (!nextTrack) return;
+
+	// Cancel existing next preload if any
+	if (queue.preloadNextProcess) {
+		queue.preloadNextProcess.kill();
+		queue.preloadNextProcess = null;
+	}
+
+	// Clean up old preloaded next file (async to not block)
+	if (queue.preloadedNext && queue.preloadedNext.url !== nextTrack.url) {
+		const oldFile = queue.preloadedNext.filePath;
+		queue.preloadedNext = null;
+		fs.unlink(oldFile, (err) => {
+			if (err && err.code !== 'ENOENT') {
+				console.error("Error cleaning next preload:", err.message);
+			}
+		});
+	}
+
+	// Skip if already preloaded
+	if (queue.preloadedNext && queue.preloadedNext.url === nextTrack.url) {
 		return;
 	}
 
 	const filePath = path.join(CACHE_DIR, `${guildId}_next.webm`);
-	console.log(`[${new Date().toLocaleTimeString()}] Preloading: ${nextTrack.title}`);
+	console.log(`[${new Date().toLocaleTimeString()}] Preloading next: ${nextTrack.title}`);
 
 	const ytdlp = spawn('yt-dlp', [
 		'-f', 'bestaudio',
@@ -48,22 +106,80 @@ function preloadNextTrack(guildId, nextTrack, queue) {
 		nextTrack.url
 	]);
 
-	queue.preloadProcess = ytdlp;
+	queue.preloadNextProcess = ytdlp;
 
 	ytdlp.on('close', (code) => {
 		if (code === 0 && fs.existsSync(filePath)) {
-			queue.preloadedTrack = {
+			queue.preloadedNext = {
 				url: nextTrack.url,
 				filePath: filePath,
 			};
-			console.log(`[${new Date().toLocaleTimeString()}] Preloaded: ${nextTrack.title}`);
+			console.log(`[${new Date().toLocaleTimeString()}] Preloaded next: ${nextTrack.title}`);
 		}
-		queue.preloadProcess = null;
+		queue.preloadNextProcess = null;
 	});
 
 	ytdlp.on('error', (error) => {
-		console.error("Preload error:", error.message);
-		queue.preloadProcess = null;
+		console.error("Next preload error:", error.message);
+		queue.preloadNextProcess = null;
+	});
+}
+
+/**
+ * Preload previous track (from history)
+ */
+function preloadPreviousTrack(guildId, previousTrack, queue) {
+	if (!previousTrack) return;
+
+	// Cancel existing previous preload if any
+	if (queue.preloadPrevProcess) {
+		queue.preloadPrevProcess.kill();
+		queue.preloadPrevProcess = null;
+	}
+
+	// Clean up old preloaded previous file (async to not block)
+	if (queue.preloadedPrev && queue.preloadedPrev.url !== previousTrack.url) {
+		const oldFile = queue.preloadedPrev.filePath;
+		queue.preloadedPrev = null;
+		fs.unlink(oldFile, (err) => {
+			if (err && err.code !== 'ENOENT') {
+				console.error("Error cleaning prev preload:", err.message);
+			}
+		});
+	}
+
+	// Skip if already preloaded
+	if (queue.preloadedPrev && queue.preloadedPrev.url === previousTrack.url) {
+		return;
+	}
+
+	const filePath = path.join(CACHE_DIR, `${guildId}_prev.webm`);
+	console.log(`[${new Date().toLocaleTimeString()}] Preloading previous: ${previousTrack.title}`);
+
+	const ytdlp = spawn('yt-dlp', [
+		'-f', 'bestaudio',
+		'-o', filePath,
+		'--no-playlist',
+		'--quiet',
+		previousTrack.url
+	]);
+
+	queue.preloadPrevProcess = ytdlp;
+
+	ytdlp.on('close', (code) => {
+		if (code === 0 && fs.existsSync(filePath)) {
+			queue.preloadedPrev = {
+				url: previousTrack.url,
+				filePath: filePath,
+			};
+			console.log(`[${new Date().toLocaleTimeString()}] Preloaded previous: ${previousTrack.title}`);
+		}
+		queue.preloadPrevProcess = null;
+	});
+
+	ytdlp.on('error', (error) => {
+		console.error("Previous preload error:", error.message);
+		queue.preloadPrevProcess = null;
 	});
 }
 
@@ -71,39 +187,90 @@ function preloadNextTrack(guildId, nextTrack, queue) {
  * Clean up preload resources
  */
 function cleanupPreload(queue) {
-	if (queue.preloadProcess) {
-		queue.preloadProcess.kill();
-		queue.preloadProcess = null;
+	// Clean up current preload
+	if (queue.preloadCurrentProcess) {
+		queue.preloadCurrentProcess.kill();
+		queue.preloadCurrentProcess = null;
 	}
-	if (queue.preloadedTrack) {
-		const fileToDelete = queue.preloadedTrack.filePath;
-		queue.preloadedTrack = null;
-		// Async delete to not block
+	if (queue.preloadedCurrent) {
+		const fileToDelete = queue.preloadedCurrent.filePath;
+		queue.preloadedCurrent = null;
 		fs.unlink(fileToDelete, (err) => {
 			if (err && err.code !== 'ENOENT') {
-				console.error("Error cleaning preload:", err.message);
+				console.error("Error cleaning current preload:", err.message);
+			}
+		});
+	}
+	
+	// Clean up next preload
+	if (queue.preloadNextProcess) {
+		queue.preloadNextProcess.kill();
+		queue.preloadNextProcess = null;
+	}
+	if (queue.preloadedNext) {
+		const fileToDelete = queue.preloadedNext.filePath;
+		queue.preloadedNext = null;
+		fs.unlink(fileToDelete, (err) => {
+			if (err && err.code !== 'ENOENT') {
+				console.error("Error cleaning next preload:", err.message);
+			}
+		});
+	}
+	
+	// Clean up previous preload
+	if (queue.preloadPrevProcess) {
+		queue.preloadPrevProcess.kill();
+		queue.preloadPrevProcess = null;
+	}
+	if (queue.preloadedPrev) {
+		const fileToDelete = queue.preloadedPrev.filePath;
+		queue.preloadedPrev = null;
+		fs.unlink(fileToDelete, (err) => {
+			if (err && err.code !== 'ENOENT') {
+				console.error("Error cleaning prev preload:", err.message);
 			}
 		});
 	}
 }
 
 /**
- * Check if track is preloaded and ready
+ * Check if track is preloaded and ready (checks current, next and prev)
  */
 function isTrackPreloaded(queue, trackUrl) {
-	if (!queue.preloadedTrack || queue.preloadedTrack.url !== trackUrl) {
-		return false;
+	// Check current preload
+	if (queue.preloadedCurrent && queue.preloadedCurrent.url === trackUrl) {
+		try {
+			if (fs.existsSync(queue.preloadedCurrent.filePath)) {
+				return { direction: 'current', data: queue.preloadedCurrent };
+			}
+		} catch {}
 	}
-	// Quick sync check is OK here since it's only called when starting playback
-	try {
-		return fs.existsSync(queue.preloadedTrack.filePath);
-	} catch {
-		return false;
+	
+	// Check next preload
+	if (queue.preloadedNext && queue.preloadedNext.url === trackUrl) {
+		try {
+			if (fs.existsSync(queue.preloadedNext.filePath)) {
+				return { direction: 'next', data: queue.preloadedNext };
+			}
+		} catch {}
 	}
+	
+	// Check previous preload
+	if (queue.preloadedPrev && queue.preloadedPrev.url === trackUrl) {
+		try {
+			if (fs.existsSync(queue.preloadedPrev.filePath)) {
+				return { direction: 'prev', data: queue.preloadedPrev };
+			}
+		} catch {}
+	}
+	
+	return false;
 }
 
 module.exports = {
+	preloadCurrentTrack,
 	preloadNextTrack,
+	preloadPreviousTrack,
 	cleanupPreload,
 	isTrackPreloaded,
 };

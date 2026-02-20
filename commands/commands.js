@@ -18,7 +18,8 @@ module.exports = {
             "`!skip` or `!next` - Skip to the next song\n" +
             "`!previous` or `!prev` - Play the previous song\n" +
             "`!loop` - Toggle loop mode\n" +
-            "`!stop` - Stop playback and clear queue",
+            "`!stop` - Stop playback and clear queue\n" +
+            "`!replay` - Replay the current song",
           inline: false
         },
         {
@@ -27,8 +28,14 @@ module.exports = {
             "`!queue` or `!q` - Show the current queue\n" +
             "`!clear` - Clear all upcoming songs\n" +
             "`!shuffle` - Shuffle the queue\n" +
-            "`!replay` - Replay the current song\n" +
             "`!replayq` - Replay the last queue",
+          inline: false
+        },
+        {
+          name: "🔊 Audio Controls",
+          value:
+            "`!volume <0-100>` - Set volume (multiples of 10)\n" +
+            "Use volume buttons on player for quick adjustments",
           inline: false
         },
         {
@@ -46,7 +53,7 @@ module.exports = {
           inline: false
         }
       )
-      .setFooter({ text: "Use the buttons on the player for quick controls!" })
+      .setFooter({ text: "Use the interactive buttons on the player for quick controls!" })
       .setTimestamp();
 
     message.channel.send({ embeds: [embed] });

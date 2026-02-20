@@ -15,6 +15,9 @@ module.exports = {
 		// Check if it's a queue pagination button
 		if (customId.startsWith('queue_prev_') || customId.startsWith('queue_next_')) {
 			action = customId.startsWith('queue_prev_') ? 'queue_prev' : 'queue_next';
+		} else if (customId.startsWith('volume_')) {
+			// Extract volume action
+			action = customId.startsWith('volume_up_') ? 'volume_up' : 'volume_down';
 		} else {
 			// Extract action from custom ID for other buttons
 			action = customId.split('_')[0];
@@ -22,25 +25,36 @@ module.exports = {
 		
 		const queue = queueMap.get(interaction.guildId);
 		if (!queue) {
-			return interaction.reply({ embeds: [createErrorEmbed("No music playing!")], ephemeral: true });
+			return interaction.reply({ embeds: [createErrorEmbed("No music playing!")], flags: 64 });
 		}
 		
 		switch (action) {
 			case "previous":
 				const history = queueHistory.get(interaction.guildId);
 				if (!history || history.length < 2) {
-					await interaction.reply({ embeds: [createErrorEmbed("No previous song!")], ephemeral: true });
+					await interaction.reply({ embeds: [createErrorEmbed("No previous song!")], flags: 64 });
 				} else {
 					const previousSong = history[history.length - 2];
-					if (queue.currentTrack) {
-						queue.tracks.unshift(queue.currentTrack);
+					const currentSong = queue.currentTrack;
+					
+					// Insert previous song at position 0, push current to position 1
+					queue.tracks[0] = previousSong;
+					if (currentSong && queue.tracks.length > 0) {
+						// Insert current song at position 1 if not already there
+						if (queue.tracks[1]?.url !== currentSong.url) {
+							queue.tracks.splice(1, 0, currentSong);
+						}
 					}
-					queue.tracks.unshift(previousSong);
+					queue.isPrevious = true;
+					
+					// Remove last 2 from history (current and previous will be re-added when playing)
 					history.splice(history.length - 2, 2);
+					
 					if (queue.playerMessage) {
 						queue.playerMessage.delete().catch(() => {});
 						queue.playerMessage = null;
 					}
+					
 					queue.intentionalStop = true;
 					queue.player.stop();
 					await interaction.update({});
@@ -77,7 +91,7 @@ module.exports = {
 					await interaction.update({});
 					queue.textChannel?.send({ embeds: [createSuccessEmbed("🔁 Replaying current song...")] }).catch(() => {});
 				} else {
-					await interaction.reply({ embeds: [createErrorEmbed("Nothing to replay!")], ephemeral: true });
+					await interaction.reply({ embeds: [createErrorEmbed("Nothing to replay!")], flags: 64 });
 				}
 				break;
 			
@@ -87,13 +101,13 @@ module.exports = {
 					await interaction.update({});
 					updatePlayerUI(queue, queue.currentTrack, queue.textChannel).catch(console.error);
 				} else {
-					await interaction.reply({ embeds: [createErrorEmbed("Nothing to shuffle!")], ephemeral: true });
+					await interaction.reply({ embeds: [createErrorEmbed("Nothing to shuffle!")], flags: 64 });
 				}
 				break;
 			
 			case "queue":
 				if (queue.tracks.length === 0) {
-					await interaction.reply({ embeds: [createInfoEmbed("Queue is empty!")], ephemeral: true });
+					await interaction.reply({ embeds: [createInfoEmbed("Queue is empty!")], flags: 64 });
 				} else {
 					const page = 1;
 					const perPage = 10;
@@ -135,7 +149,7 @@ module.exports = {
 					await interaction.reply({ 
 						embeds: [createInfoEmbed(queueMessage)],
 						components,
-						ephemeral: true 
+						flags: 64
 					});
 				}
 				break;
@@ -189,7 +203,7 @@ module.exports = {
 					});
 				} catch (error) {
 					console.error("Queue pagination error:", error);
-					await interaction.reply({ embeds: [createErrorEmbed("Failed to update queue page.")], ephemeral: true }).catch(() => {});
+					await interaction.reply({ embeds: [createErrorEmbed("Failed to update queue page.")], flags: 64 }).catch(() => {});
 				}
 				break;
 			
@@ -198,8 +212,28 @@ module.exports = {
 				await interaction.update({});
 				break;
 			
+			case "volume_up":
+				let newVolumeUp = Math.min(100, (queue.volume || 100) + 10);
+				queue.volume = newVolumeUp;
+				if (queue.player.state.resource) {
+					queue.player.state.resource.volume.setVolume(newVolumeUp / 100);
+				}
+				await interaction.update({});
+				updatePlayerUI(queue, queue.currentTrack, queue.textChannel).catch(console.error);
+				break;
+			
+			case "volume_down":
+				let newVolumeDown = Math.max(0, (queue.volume || 100) - 10);
+				queue.volume = newVolumeDown;
+				if (queue.player.state.resource) {
+					queue.player.state.resource.volume.setVolume(newVolumeDown / 100);
+				}
+				await interaction.update({});
+				updatePlayerUI(queue, queue.currentTrack, queue.textChannel).catch(console.error);
+				break;
+			
 			default:
-				await interaction.reply({ embeds: [createErrorEmbed("Unknown button")], ephemeral: true });
+				await interaction.reply({ embeds: [createErrorEmbed("Unknown button")], flags: 64 });
 		}
 	},
 };

@@ -14,12 +14,22 @@ async function getDirectAudioUrl(videoUrl) {
 			addHeader: ['referer:youtube.com', 'user-agent:googlebot']
 		});
 		
+		// Check if formats exist
+		if (!info.formats || !Array.isArray(info.formats) || info.formats.length === 0) {
+			console.error("No formats found in video info");
+			return {
+				url: null,
+				duration: info.duration || 0,
+				title: info.title || 'Unknown'
+			};
+		}
+		
 		// Get best audio format
 		const audioFormat = info.formats.find(f => f.acodec !== 'none' && f.vcodec === 'none') || info.formats[0];
 		return {
-			url: audioFormat.url,
+			url: audioFormat?.url || null,
 			duration: info.duration || 0,
-			title: info.title
+			title: info.title || 'Unknown'
 		};
 	} catch (error) {
 		console.error("Error getting direct audio URL:", error.message);

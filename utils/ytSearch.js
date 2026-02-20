@@ -32,7 +32,8 @@ async function searchYouTube(query) {
   return {
     title: video.title,
     url: video.url,
-    duration: video.timestamp
+    duration: video.timestamp,
+    seconds: video.seconds
   };
 }
 

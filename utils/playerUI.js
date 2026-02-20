@@ -116,26 +116,51 @@ function createSystemButtons(queue) {
 }
 
 /**
+ * Create volume control buttons (Row 3: Volume)
+ */
+function createVolumeButtons(queue) {
+	const guildId = queue.connection?.joinConfig?.guildId || '';
+	const currentVolume = queue.volume || 100;
+	
+	return new ActionRowBuilder().addComponents(
+		new ButtonBuilder()
+			.setCustomId(`volume_down_${guildId}`)
+			.setEmoji("🔉")
+			.setLabel(`➖`)
+			.setStyle(ButtonStyle.Secondary)
+			.setDisabled(currentVolume <= 0),
+		
+		new ButtonBuilder()
+			.setCustomId(`volume_up_${guildId}`)
+			.setEmoji("🔊")
+			.setLabel(`➕`)
+			.setStyle(ButtonStyle.Secondary)
+			.setDisabled(currentVolume >= 100)
+	);
+}
+
+/**
  * Send or update player UI
  */
 async function updatePlayerUI(queue, track, channel) {
 	const embed = createNowPlayingEmbed(track, queue);
 	const playbackRow = createPlaybackButtons(queue);
 	const systemRow = createSystemButtons(queue);
+	const volumeRow = createVolumeButtons(queue);
 	
 	if (queue.playerMessage) {
 		// Update existing message
 		try {
 			await queue.playerMessage.edit({ 
 				embeds: [embed], 
-				components: [playbackRow, systemRow] 
+				components: [playbackRow, systemRow, volumeRow] 
 			});
 		} catch (error) {
 			// Message deleted or doesn't exist, send new one
 			try {
 				queue.playerMessage = await channel.send({ 
 					embeds: [embed], 
-					components: [playbackRow, systemRow] 
+					components: [playbackRow, systemRow, volumeRow] 
 				});
 				startProgressUpdates(queue, track, channel);
 			} catch (e) {
@@ -147,7 +172,7 @@ async function updatePlayerUI(queue, track, channel) {
 		try {
 			queue.playerMessage = await channel.send({ 
 				embeds: [embed], 
-				components: [playbackRow, systemRow] 
+				components: [playbackRow, systemRow, volumeRow] 
 			});
 			startProgressUpdates(queue, track, channel);
 		} catch (error) {
@@ -171,10 +196,11 @@ function startProgressUpdates(queue, track, channel) {
 			const embed = createNowPlayingEmbed(track, queue);
 			const playbackRow = createPlaybackButtons(queue);
 			const systemRow = createSystemButtons(queue);
+			const volumeRow = createVolumeButtons(queue);
 			
 			queue.playerMessage.edit({ 
 				embeds: [embed], 
-				components: [playbackRow, systemRow] 
+				components: [playbackRow, systemRow, volumeRow] 
 			}).catch(() => {
 				// Message deleted, clear interval
 				if (queue.progressInterval) {
@@ -257,6 +283,7 @@ module.exports = {
 	createNowPlayingEmbed,
 	createPlaybackButtons,
 	createSystemButtons,
+	createVolumeButtons,
 	updatePlayerUI,
 	disablePlayerUI,
 	startProgressUpdates,

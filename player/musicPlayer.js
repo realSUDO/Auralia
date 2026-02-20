@@ -10,7 +10,7 @@ const {
 const fs = require("fs");
 const { spawn } = require("child_process");
 const { getDirectAudioUrl, createSeekableStream } = require("../utils/seek");
-const { preloadNextTrack, cleanupPreload, isTrackPreloaded } = require("../utils/preload");
+const { preloadCurrentTrack, preloadNextTrack, preloadPreviousTrack, cleanupPreload, isTrackPreloaded } = require("../utils/preload");
 const { updatePlayerUI, disablePlayerUI } = require("../utils/playerUI");
 
 const queueMap = new Map();
@@ -43,8 +43,12 @@ function enqueueTrack(guildId, track, client, textChannel) {
 				intentionalStop: false,
 				currentStream: null,
 				aloneTimer: null,
-				preloadProcess: null,
-				preloadedTrack: null,
+				preloadCurrentProcess: null,
+				preloadNextProcess: null,
+				preloadPrevProcess: null,
+				preloadedCurrent: null,
+				preloadedNext: null,
+				preloadedPrev: null,
 				currentTrack: null,
 				playbackStartTime: null,
 				playbackOffset: 0,
@@ -54,6 +58,7 @@ function enqueueTrack(guildId, track, client, textChannel) {
 				playerMessage: null,
 				isSeeking: false,
 				voiceStateHandler: null,
+				volume: 100,
 			};
 			queueMap.set(guildId, queue);
 		} else {
@@ -119,8 +124,11 @@ async function startPlaying(guildId, client) {
 	console.log("Track URL:", track.url);
 	console.log(`[${new Date().toLocaleTimeString()}] Starting to play: ${track.title}`);
 
-	// Store current track
+	// Store current track and duration if available
 	queue.currentTrack = track;
+	if (track.duration) {
+		queue.duration = track.duration;
+	}
 	
 	// Add to history (avoid duplicates of same URL)
 	if (!queueHistory.has(guildId)) {
@@ -252,6 +260,14 @@ async function startPlaying(guildId, client) {
 				return;
 			}
 			
+			// Handle previous mode (don't shift, just play tracks[0])
+			if (queue.isPrevious) {
+				console.log(`[${new Date().toLocaleTimeString()}] Playing previous track`);
+				queue.isPrevious = false;
+				startPlaying(guildId, client);
+				return;
+			}
+			
 			// Handle loop mode
 			if (queue.isLooping && queue.currentTrack) {
 				console.log(`[${new Date().toLocaleTimeString()}] Looping current track`);
@@ -326,12 +342,14 @@ async function startPlaying(guildId, client) {
 	let ytdlpProcess;
 	
 	// Check if this track is preloaded
-	if (isTrackPreloaded(queue, track.url)) {
+	const preloaded = isTrackPreloaded(queue, track.url);
+	if (preloaded) {
 		console.log(`[${new Date().toLocaleTimeString()}] Using preloaded file for: ${track.title}`);
-		stream = fs.createReadStream(queue.preloadedTrack.filePath);
+		stream = fs.createReadStream(preloaded.data.filePath);
 		queue.currentStream = stream;
 		
-		const resource = createAudioResource(stream);
+		const resource = createAudioResource(stream, { inlineVolume: true });
+		resource.volume.setVolume((queue.volume || 100) / 100);
 		queue.player.play(resource);
 		queue.playbackStartTime = Date.now();
 		queue.playbackOffset = 0;
@@ -339,9 +357,15 @@ async function startPlaying(guildId, client) {
 		// Update player UI
 		updatePlayerUI(queue, track, queue.textChannel).catch(console.error);
 		
-		// Clean up preloaded file after playback starts
-		const fileToDelete = queue.preloadedTrack.filePath;
-		queue.preloadedTrack = null;
+		// Clean up used preloaded file
+		const fileToDelete = preloaded.data.filePath;
+		if (preloaded.direction === 'next') {
+			queue.preloadedNext = null;
+		} else if (preloaded.direction === 'prev') {
+			queue.preloadedPrev = null;
+		} else {
+			queue.preloadedCurrent = null;
+		}
 		
 		// Delete file after a short delay to ensure stream has started
 		setTimeout(() => {
@@ -355,9 +379,14 @@ async function startPlaying(guildId, client) {
 			}
 		}, 2000);
 		
-		// Preload next track if available
+		// Preload current, next and previous tracks
+		preloadCurrentTrack(guildId, track, queue);
 		if (queue.tracks.length > 1) {
 			preloadNextTrack(guildId, queue.tracks[1], queue);
+		}
+		const history = queueHistory.get(guildId);
+		if (history && history.length >= 2) {
+			preloadPreviousTrack(guildId, history[history.length - 2], queue);
 		}
 		
 		return;
@@ -376,11 +405,18 @@ async function startPlaying(guildId, client) {
 		queue.currentStream = stream;
 		queue.playbackOffset = 0;
 		
+		// Start preloading current track immediately (in parallel with streaming)
+		preloadCurrentTrack(guildId, track, queue);
+		
 		// Fetch audio info in background for seeking support (non-blocking)
 		getDirectAudioUrl(track.url).then(audioInfo => {
 			if (audioInfo && queue.currentStream === stream) {
-				queue.audioUrl = audioInfo.url;
-				queue.duration = audioInfo.duration;
+				if (audioInfo.url) {
+					queue.audioUrl = audioInfo.url;
+				}
+				if (audioInfo.duration) {
+					queue.duration = audioInfo.duration;
+				}
 			}
 		}).catch(() => {});
 		
@@ -392,7 +428,8 @@ async function startPlaying(guildId, client) {
 			streamStarted = true;
 			
 			console.log(`[${new Date().toLocaleTimeString()}] Stream readable, creating audio resource`);
-			const resource = createAudioResource(stream);
+			const resource = createAudioResource(stream, { inlineVolume: true });
+			resource.volume.setVolume((queue.volume || 100) / 100);
 			
 			console.log(`[${new Date().toLocaleTimeString()}] Starting audio player`);
 			queue.player.play(resource);
@@ -403,10 +440,16 @@ async function startPlaying(guildId, client) {
 			// Update player UI
 			updatePlayerUI(queue, track, queue.textChannel).catch(console.error);
 			
-			// Start preloading next track
+			// Start preloading next and previous tracks (current already started above)
 			if (queue.tracks.length > 1) {
 				console.log(`[${new Date().toLocaleTimeString()}] Triggering preload for next track`);
 				preloadNextTrack(guildId, queue.tracks[1], queue);
+			}
+			const history = queueHistory.get(guildId);
+			if (history && history.length >= 2) {
+				console.log(`[${new Date().toLocaleTimeString()}] Triggering preload for previous track`);
+				// Preload the actual previous song (second to last in history)
+				preloadPreviousTrack(guildId, history[history.length - 2], queue);
 			}
 		});
 		
@@ -606,7 +649,8 @@ async function seekTrack(guildId, offsetSeconds, client) {
 	queue.playbackStartTime = Date.now();
 	
 	// Create and play resource immediately
-	const resource = createAudioResource(stream);
+	const resource = createAudioResource(stream, { inlineVolume: true });
+	resource.volume.setVolume((queue.volume || 100) / 100);
 	queue.player.play(resource);
 	
 	// Reset flag after player stabilizes
@@ -624,6 +668,11 @@ async function seekTrack(guildId, offsetSeconds, client) {
 function replayCurrentSong(guildId) {
 	const queue = queueMap.get(guildId);
 	if (!queue || !queue.currentTrack) return false;
+
+	// Ensure current track is at tracks[0]
+	if (queue.tracks[0]?.url !== queue.currentTrack.url) {
+		queue.tracks[0] = queue.currentTrack;
+	}
 
 	// Mark as replay so Idle handler doesn't shift the queue
 	queue.isReplaying = true;
