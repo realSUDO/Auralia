@@ -53,6 +53,7 @@ function enqueueTrack(guildId, track, client, textChannel) {
 				isPaused: false,
 				playerMessage: null,
 				isSeeking: false,
+				voiceStateHandler: null,
 			};
 			queueMap.set(guildId, queue);
 		} else {
@@ -60,6 +61,13 @@ function enqueueTrack(guildId, track, client, textChannel) {
 		}
 
 		queue.tracks.push(track);
+		
+		// Clear inactivity timer when new track is added
+		if (queue.aloneTimer) {
+			clearTimeout(queue.aloneTimer);
+			queue.aloneTimer = null;
+		}
+		
 		console.log(`[${new Date().toLocaleTimeString()}] Track added to queue. Queue length: ${queue.tracks.length}`);
 
 		if (!queue.playing) {
@@ -158,6 +166,49 @@ async function startPlaying(guildId, client) {
 			queueMap.delete(guildId);
 			return;
 		}
+		
+		// Handle disconnection (kicked/moved)
+		queue.connection.on(VoiceConnectionStatus.Disconnected, async () => {
+			try {
+				await Promise.race([
+					entersState(queue.connection, VoiceConnectionStatus.Signalling, 5_000),
+					entersState(queue.connection, VoiceConnectionStatus.Connecting, 5_000),
+				]);
+			} catch {
+				// Disconnected permanently
+				console.log(`[${new Date().toLocaleTimeString()}] Bot disconnected from voice channel`);
+				
+				const q = queueMap.get(guildId);
+				if (q) {
+					const { createInfoEmbed } = require("../utils/embeds");
+					q.textChannel?.send({ embeds: [createInfoEmbed("Disconnected from voice channel.")] }).catch(() => {});
+					
+					// Clear player message
+					if (q.playerMessage) {
+						q.playerMessage.delete().catch(() => {});
+						q.playerMessage = null;
+					}
+					
+					// Clear progress interval
+					if (q.progressInterval) {
+						clearInterval(q.progressInterval);
+						q.progressInterval = null;
+					}
+					
+					// Remove voice state listener
+					if (q.voiceStateHandler) {
+						client.off('voiceStateUpdate', q.voiceStateHandler);
+						q.voiceStateHandler = null;
+					}
+					
+					q.tracks = [];
+					q.playing = false;
+					if (q.player) q.player.stop();
+					safeDestroy(q);
+					queueMap.delete(guildId);
+				}
+			}
+		});
 
 		// Start monitoring voice channel for alone status
 		startAloneMonitoring(guildId, client);
@@ -227,41 +278,6 @@ async function startPlaying(guildId, client) {
 				
 				const { createSuccessEmbed } = require("../utils/embeds");
 				queue.textChannel?.send({ embeds: [createSuccessEmbed("All songs played.")] }).catch(() => {});
-				
-				// Trigger inactivity check
-				const checkAlone = () => {
-					const q = queueMap.get(guildId);
-					if (!q || !q.voiceChannel) return;
-					
-					const isInactive = !q.playing || q.tracks.length === 0;
-					
-					if (isInactive && !q.aloneTimer) {
-						q.aloneTimer = setTimeout(() => {
-							const queue = queueMap.get(guildId);
-							if (queue) {
-								const { createInfoEmbed } = require("../utils/embeds");
-								queue.textChannel?.send({ embeds: [createInfoEmbed("Left voice channel due to inactivity.")] }).catch(() => {});
-								
-								if (queue.playerMessage) {
-									queue.playerMessage.delete().catch(() => {});
-									queue.playerMessage = null;
-								}
-								
-								if (queue.progressInterval) {
-									clearInterval(queue.progressInterval);
-									queue.progressInterval = null;
-								}
-								
-								queue.tracks = [];
-								queue.playing = false;
-								if (queue.player) queue.player.stop();
-								safeDestroy(queue);
-								queueMap.delete(guildId);
-							}
-						}, 60000);
-					}
-				};
-				checkAlone();
 			}
 		});
 		
@@ -451,6 +467,13 @@ function skipTrack(queue, guildId, client) {
 	} else {
 		cleanupPreload(queue);
 		queue.playing = false;
+		
+		// Remove voice state listener
+		if (queue.voiceStateHandler) {
+			client.off('voiceStateUpdate', queue.voiceStateHandler);
+			queue.voiceStateHandler = null;
+		}
+		
 		safeDestroy(queue);
 		queueMap.delete(guildId);
 	}
@@ -464,6 +487,7 @@ function safeDestroy(queue) {
 		clearTimeout(queue.aloneTimer);
 		queue.aloneTimer = null;
 	}
+	
 	cleanupPreload(queue);
 	if (queue.connection) {
 		try {
@@ -482,6 +506,11 @@ function safeDestroy(queue) {
 function startAloneMonitoring(guildId, client) {
 	const queue = queueMap.get(guildId);
 	if (!queue || !queue.voiceChannel) return;
+	
+	// Remove existing handler if any to prevent duplicates
+	if (queue.voiceStateHandler) {
+		client.off('voiceStateUpdate', queue.voiceStateHandler);
+	}
 
 	const checkAlone = () => {
 		const queue = queueMap.get(guildId);
@@ -511,6 +540,12 @@ function startAloneMonitoring(guildId, client) {
 							q.progressInterval = null;
 						}
 						
+						// Remove voice state listener
+						if (q.voiceStateHandler) {
+							client.off('voiceStateUpdate', q.voiceStateHandler);
+							q.voiceStateHandler = null;
+						}
+						
 						q.tracks = [];
 						q.playing = false;
 						if (q.player) q.player.stop();
@@ -537,7 +572,9 @@ function startAloneMonitoring(guildId, client) {
 			checkAlone();
 		}
 	};
-
+	
+	// Store handler reference and attach listener
+	queue.voiceStateHandler = voiceStateHandler;
 	client.on('voiceStateUpdate', voiceStateHandler);
 }
 
@@ -646,6 +683,7 @@ function replayLastQueue(guildId, client, textChannel, requester) {
 			isLooping: false,
 			isReplaying: false,
 			progressInterval: null,
+			voiceStateHandler: null,
 		};
 		queueMap.set(guildId, queue);
 	}
@@ -719,6 +757,18 @@ function stopPlayback(guildId) {
 	if (!queue) return false;
 
 	console.log(`[${new Date().toLocaleTimeString()}] Stopping playback for guild ${guildId}`);
+	
+	// Clear player message
+	if (queue.playerMessage) {
+		queue.playerMessage.delete().catch(() => {});
+		queue.playerMessage = null;
+	}
+	
+	// Clear progress interval
+	if (queue.progressInterval) {
+		clearInterval(queue.progressInterval);
+		queue.progressInterval = null;
+	}
 	
 	queue.tracks = [];
 	queue.playing = false;

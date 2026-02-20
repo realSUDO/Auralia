@@ -1,10 +1,10 @@
 // utils/spotify.js
 const SpotifyWebApi = require('spotify-web-api-node');
-const { spotifyClientId, spotifyClientSecret } = require('../config.json');
+const config = require('../config');
 
 const spotifyApi = new SpotifyWebApi({
-  clientId: spotifyClientId,
-  clientSecret: spotifyClientSecret
+  clientId: config.spotifyClientId,
+  clientSecret: config.spotifyClientSecret
 });
 
 let spotifyReady = false; // ✅ GLOBAL readiness flag

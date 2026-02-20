@@ -5,7 +5,7 @@ const { createSuccessEmbed, createErrorEmbed } = require("../utils/embeds");
 module.exports = {
   name: "leave",
   description: "Stops the music and leaves the voice channel",
-  execute(message) {
+  execute(message, args, client) {
     const queue = queueMap.get(message.guild.id);
     
     if (!queue) {
@@ -24,6 +24,12 @@ module.exports = {
     if (queue.progressInterval) {
       clearInterval(queue.progressInterval);
       queue.progressInterval = null;
+    }
+    
+    // Remove voice state listener
+    if (queue.voiceStateHandler) {
+      client.off('voiceStateUpdate', queue.voiceStateHandler);
+      queue.voiceStateHandler = null;
     }
     
     if (queue.connection) {

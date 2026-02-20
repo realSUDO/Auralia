@@ -8,8 +8,17 @@ module.exports = {
 	async execute(interaction, client) {
 		if (!interaction.isButton()) return;
 		
-		// Extract guild ID from custom ID
-		const [action, guildId] = interaction.customId.split('_');
+		// Determine action type
+		const customId = interaction.customId;
+		let action;
+		
+		// Check if it's a queue pagination button
+		if (customId.startsWith('queue_prev_') || customId.startsWith('queue_next_')) {
+			action = customId.startsWith('queue_prev_') ? 'queue_prev' : 'queue_next';
+		} else {
+			// Extract action from custom ID for other buttons
+			action = customId.split('_')[0];
+		}
 		
 		const queue = queueMap.get(interaction.guildId);
 		if (!queue) {
@@ -86,54 +95,102 @@ module.exports = {
 				if (queue.tracks.length === 0) {
 					await interaction.reply({ embeds: [createInfoEmbed("Queue is empty!")], ephemeral: true });
 				} else {
-					const queueList = queue.tracks.slice(0, 10).map((t, i) => `${i + 1}. ${t.title}`).join('\n');
-					const more = queue.tracks.length > 10 ? `\n...and ${queue.tracks.length - 10} more` : '';
-					await interaction.reply({ embeds: [createInfoEmbed(`**Queue:**\n${queueList}${more}`)], ephemeral: true });
+					const page = 1;
+					const perPage = 10;
+					const totalPages = Math.ceil(queue.tracks.length / perPage);
+					
+					const current = queue.tracks[0];
+					const upcoming = queue.tracks.slice(1, perPage + 1);
+					
+					let queueMessage = `🎵 **Now Playing:**\n${current.title}\n\n`;
+					
+					if (upcoming.length > 0) {
+						queueMessage += `**Up Next (Page ${page}/${totalPages}):**\n`;
+						upcoming.forEach((track, index) => {
+							queueMessage += `${index + 1}. ${track.title}\n`;
+						});
+					} else {
+						queueMessage += `No upcoming songs.`;
+					}
+					
+					const components = [];
+					if (totalPages > 1) {
+						const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
+						const row = new ActionRowBuilder().addComponents(
+							new ButtonBuilder()
+								.setCustomId(`queue_prev_${page}_${interaction.guildId}`)
+								.setLabel("Previous")
+								.setStyle(ButtonStyle.Secondary)
+								.setDisabled(true),
+							
+							new ButtonBuilder()
+								.setCustomId(`queue_next_${page}_${interaction.guildId}`)
+								.setLabel("Next")
+								.setStyle(ButtonStyle.Secondary)
+								.setDisabled(false)
+						);
+						components.push(row);
+					}
+					
+					await interaction.reply({ 
+						embeds: [createInfoEmbed(queueMessage)],
+						components,
+						ephemeral: true 
+					});
 				}
 				break;
 			
 			case "queue_prev":
 			case "queue_next":
-				const [, direction, currentPage] = interaction.customId.split('_');
-				const page = direction === 'next' ? parseInt(currentPage) + 1 : parseInt(currentPage) - 1;
-				const perPage = 10;
-				const start = (page - 1) * perPage;
-				const end = start + perPage;
-				const totalPages = Math.ceil(queue.tracks.length / perPage);
-				
-				const upcoming = queue.tracks.slice(start + 1, end + 1);
-				let queueMessage = page === 1 ? `🎵 **Now Playing:**\n${queue.tracks[0].title}\n\n` : '';
-				
-				if (upcoming.length > 0) {
-					queueMessage += `**Up Next (Page ${page}/${totalPages}):**\n`;
-					upcoming.forEach((track, index) => {
-						queueMessage += `${start + index + 1}. ${track.title}\n`;
+				try {
+					const [, direction, currentPage] = interaction.customId.split('_');
+					const page = direction === 'next' ? parseInt(currentPage) + 1 : parseInt(currentPage) - 1;
+					const perPage = 10;
+					const start = (page - 1) * perPage;
+					const end = start + perPage;
+					const totalPages = Math.ceil(queue.tracks.length / perPage);
+					
+					const current = queue.tracks[0];
+					const upcoming = queue.tracks.slice(start + 1, end + 1);
+					
+					let queueMessage = page === 1 ? `🎵 **Now Playing:**\n${current.title}\n\n` : '';
+					
+					if (upcoming.length > 0) {
+						queueMessage += `**Up Next (Page ${page}/${totalPages}):**\n`;
+						upcoming.forEach((track, index) => {
+							queueMessage += `${start + index + 1}. ${track.title}\n`;
+						});
+					} else if (page === 1) {
+						queueMessage += `No upcoming songs.`;
+					}
+					
+					const components = [];
+					if (totalPages > 1) {
+						const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
+						const row = new ActionRowBuilder().addComponents(
+							new ButtonBuilder()
+								.setCustomId(`queue_prev_${page}_${interaction.guildId}`)
+								.setLabel("Previous")
+								.setStyle(ButtonStyle.Secondary)
+								.setDisabled(page === 1),
+							
+							new ButtonBuilder()
+								.setCustomId(`queue_next_${page}_${interaction.guildId}`)
+								.setLabel("Next")
+								.setStyle(ButtonStyle.Secondary)
+								.setDisabled(page === totalPages)
+						);
+						components.push(row);
+					}
+					
+					await interaction.update({ 
+						embeds: [createInfoEmbed(queueMessage)],
+						components 
 					});
+				} catch (error) {
+					console.error("Queue pagination error:", error);
+					await interaction.reply({ embeds: [createErrorEmbed("Failed to update queue page.")], ephemeral: true }).catch(() => {});
 				}
-				
-				const components = [];
-				if (totalPages > 1) {
-					const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
-					const row = new ActionRowBuilder().addComponents(
-						new ButtonBuilder()
-							.setCustomId(`queue_prev_${page}_${interaction.guildId}`)
-							.setLabel("Previous")
-							.setStyle(ButtonStyle.Secondary)
-							.setDisabled(page === 1),
-						
-						new ButtonBuilder()
-							.setCustomId(`queue_next_${page}_${interaction.guildId}`)
-							.setLabel("Next")
-							.setStyle(ButtonStyle.Secondary)
-							.setDisabled(page === totalPages)
-					);
-					components.push(row);
-				}
-				
-				await interaction.update({ 
-					embeds: [createInfoEmbed(queueMessage)],
-					components 
-				});
 				break;
 			
 			case "stop":
