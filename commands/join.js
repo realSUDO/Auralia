@@ -2,34 +2,27 @@ const { joinVoiceChannel } = require("@discordjs/voice");
 const { queueMap } = require("../player/musicPlayer");
 const { createSuccessEmbed, createErrorEmbed } = require("../utils/embeds");
 
+function handleJoin(user, guild, send) {
+  const member = guild.members.cache.get(user.id);
+  if (!member?.voice.channel) return send({ embeds: [createErrorEmbed("You need to be in a voice channel!")] });
+
+  const voiceChannel = member.voice.channel;
+  const queue = queueMap.get(guild.id);
+  if (queue?.voiceChannel?.id === voiceChannel.id) return send({ embeds: [createErrorEmbed("I'm already in your voice channel!")] });
+  if (queue?.connection) queue.connection.destroy();
+
+  joinVoiceChannel({ channelId: voiceChannel.id, guildId: guild.id, adapterCreator: guild.voiceAdapterCreator });
+  send({ embeds: [createSuccessEmbed(`Joined **${voiceChannel.name}**`)] });
+}
+
 module.exports = {
   name: "join",
   description: "Makes the bot join your voice channel",
-  execute(message, args, client) {
-    const voiceChannel = message.member.voice.channel;
-    
-    if (!voiceChannel) {
-      return message.reply({ embeds: [createErrorEmbed("You need to be in a voice channel!")] }).catch(() => {});
-    }
-
-    const queue = queueMap.get(message.guild.id);
-    
-    if (queue && queue.voiceChannel && queue.voiceChannel.id === voiceChannel.id) {
-      return message.reply({ embeds: [createErrorEmbed("I'm already in your voice channel!")] }).catch(() => {});
-    }
-    
-    // If bot is in a different channel, disconnect first
-    if (queue && queue.connection) {
-      queue.connection.destroy();
-    }
-    
-    // Join the voice channel
-    const connection = joinVoiceChannel({
-      channelId: voiceChannel.id,
-      guildId: message.guild.id,
-      adapterCreator: message.guild.voiceAdapterCreator,
-    });
-
-    message.channel.send({ embeds: [createSuccessEmbed(`Joined ${voiceChannel.name}`)] }).catch(() => {});
+  execute(message) {
+    handleJoin(message.author, message.guild, (msg) => message.channel.send(msg).catch(() => {}));
+  },
+  async slashExecute(interaction) {
+    await interaction.deferReply({ ephemeral: true });
+    handleJoin(interaction.user, interaction.guild, (msg) => interaction.editReply(msg).catch(() => {}));
   },
 };

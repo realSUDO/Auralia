@@ -1,40 +1,30 @@
 const { queueMap } = require("../player/musicPlayer");
 const { createSuccessEmbed, createErrorEmbed } = require("../utils/embeds");
 
+function handleVolume(guildId, level, send) {
+  const queue = queueMap.get(guildId);
+  if (!queue?.player) return send({ embeds: [createErrorEmbed("There's no music playing!")] });
+
+  if (level === null) {
+    return send({ embeds: [createSuccessEmbed(`Current volume: ${queue.volume || 100}%`)] });
+  }
+
+  const volume = Math.round(Math.max(0, Math.min(100, level)) / 10) * 10;
+  queue.volume = volume;
+  if (queue.player.state.resource) queue.player.state.resource.volume.setVolume(volume / 100);
+  send({ embeds: [createSuccessEmbed(`🔊 Volume set to ${volume}%`)] });
+}
+
 module.exports = {
   name: "volume",
-  description: "Set the volume (0-100, multiples of 10)",
+  description: "Set or check the volume (0-100)",
   execute(message, args) {
-    const queue = queueMap.get(message.guild.id);
-    
-    if (!queue || !queue.player) {
-      return message.reply({ embeds: [createErrorEmbed("There's no music playing!")] });
-    }
-
-    if (args.length === 0) {
-      const currentVolume = queue.volume || 100;
-      return message.reply({ embeds: [createSuccessEmbed(`Current volume: ${currentVolume}%`)] });
-    }
-
-    let volume = parseInt(args[0]);
-    
-    if (isNaN(volume)) {
-      return message.reply({ embeds: [createErrorEmbed("Please provide a valid number!")] });
-    }
-
-    // Clamp between 0 and 100
-    volume = Math.max(0, Math.min(100, volume));
-    
-    // Round to nearest 10
-    volume = Math.round(volume / 10) * 10;
-    
-    // Set volume (Discord.js uses 0.0 to 1.0 scale)
-    queue.volume = volume;
-    
-    if (queue.player.state.resource) {
-      queue.player.state.resource.volume.setVolume(volume / 100);
-    }
-    
-    message.channel.send({ embeds: [createSuccessEmbed(`🔊 Volume set to ${volume}%`)] }).catch(() => {});
+    const level = args.length ? parseInt(args[0]) : null;
+    handleVolume(message.guild.id, isNaN(level) ? null : level, (msg) => message.channel.send(msg).catch(() => {}));
+  },
+  async slashExecute(interaction) {
+    await interaction.deferReply({ ephemeral: true });
+    const level = interaction.options.getInteger("level");
+    handleVolume(interaction.guildId, level ?? null, (msg) => interaction.editReply(msg).catch(() => {}));
   },
 };

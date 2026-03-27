@@ -48,7 +48,6 @@ function preloadCurrentTrack(guildId, currentTrack, queue) {
 
 	const filePath = path.join(CACHE_DIR, `${guildId}_current.webm`);
 	const tmpPath = filePath + '.tmp';
-	console.log(`[${new Date().toLocaleTimeString()}] Preloading current: ${currentTrack.title}`);
 
 	const ytdlp = spawn('yt-dlp', [
 		'-f', 'bestaudio',
@@ -64,7 +63,6 @@ function preloadCurrentTrack(guildId, currentTrack, queue) {
 		if (code === 0 && fs.existsSync(tmpPath)) {
 			try { fs.renameSync(tmpPath, filePath); } catch (e) { queue.preloadCurrentProcess = null; return; }
 			queue.preloadedCurrent = { url: currentTrack.url, filePath };
-			console.log(`[${new Date().toLocaleTimeString()}] Preloaded current: ${currentTrack.title}`);
 		} else {
 			fs.unlink(tmpPath, () => {});
 		}
@@ -108,7 +106,6 @@ function preloadNextTrack(guildId, nextTrack, queue) {
 
 	const filePath = path.join(CACHE_DIR, `${guildId}_next.webm`);
 	const tmpPath = filePath + '.tmp';
-	console.log(`[${new Date().toLocaleTimeString()}] Preloading next: ${nextTrack.title}`);
 
 	const ytdlp = spawn('yt-dlp', [
 		'-f', 'bestaudio',
@@ -124,7 +121,6 @@ function preloadNextTrack(guildId, nextTrack, queue) {
 		if (code === 0 && fs.existsSync(tmpPath)) {
 			try { fs.renameSync(tmpPath, filePath); } catch (e) { queue.preloadNextProcess = null; return; }
 			queue.preloadedNext = { url: nextTrack.url, filePath };
-			console.log(`[${new Date().toLocaleTimeString()}] Preloaded next: ${nextTrack.title}`);
 		} else {
 			fs.unlink(tmpPath, () => {});
 		}
@@ -168,7 +164,6 @@ function preloadPreviousTrack(guildId, previousTrack, queue) {
 
 	const filePath = path.join(CACHE_DIR, `${guildId}_prev.webm`);
 	const tmpPath = filePath + '.tmp';
-	console.log(`[${new Date().toLocaleTimeString()}] Preloading previous: ${previousTrack.title}`);
 
 	const ytdlp = spawn('yt-dlp', [
 		'-f', 'bestaudio',
@@ -184,7 +179,6 @@ function preloadPreviousTrack(guildId, previousTrack, queue) {
 		if (code === 0 && fs.existsSync(tmpPath)) {
 			try { fs.renameSync(tmpPath, filePath); } catch (e) { queue.preloadPrevProcess = null; return; }
 			queue.preloadedPrev = { url: previousTrack.url, filePath };
-			console.log(`[${new Date().toLocaleTimeString()}] Preloaded previous: ${previousTrack.title}`);
 		} else {
 			fs.unlink(tmpPath, () => {});
 		}

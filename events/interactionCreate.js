@@ -6,8 +6,22 @@ const { createSuccessEmbed, createErrorEmbed, createInfoEmbed } = require("../ut
 module.exports = {
 	name: "interactionCreate",
 	async execute(interaction, client) {
+		// Handle slash commands
+		if (interaction.isChatInputCommand()) {
+			const command = client.commands.get(interaction.commandName);
+			if (!command?.slashExecute) return interaction.reply({ embeds: [createErrorEmbed("Command not found.")], ephemeral: true });
+			try {
+				await command.slashExecute(interaction, client);
+			} catch (err) {
+				console.error(err);
+				const msg = { embeds: [createErrorEmbed("Something went wrong.")], ephemeral: true };
+				interaction.replied || interaction.deferred ? interaction.editReply(msg).catch(() => {}) : interaction.reply(msg).catch(() => {});
+			}
+			return;
+		}
+
 		if (!interaction.isButton()) return;
-		
+
 		// Determine action type
 		const customId = interaction.customId;
 		let action;

@@ -1,23 +1,25 @@
 const { queueMap } = require("../player/musicPlayer");
 const { createSuccessEmbed, createErrorEmbed } = require("../utils/embeds");
 
+function handleSkip(guildId, send) {
+  const queue = queueMap.get(guildId);
+  if (!queue?.player) return send({ embeds: [createErrorEmbed("There's no music playing!")] });
+  if (!queue.tracks.length) return send({ embeds: [createErrorEmbed("There's nothing to skip!")] });
+
+  const skipped = queue.tracks[0].title;
+  queue.intentionalStop = true;
+  queue.player.stop();
+  send({ embeds: [createSuccessEmbed(`Skipped: **${skipped}**`)] });
+}
+
 module.exports = {
   name: "skip",
   description: "Skips the current song",
   execute(message) {
-    const queue = queueMap.get(message.guild.id);
-    
-    if (!queue || !queue.player) {
-      return message.reply({ embeds: [createErrorEmbed("There's no music playing!")] });
-    }
-
-    if (queue.tracks.length === 0) {
-      return message.reply({ embeds: [createErrorEmbed("There's nothing to skip!")] });
-    }
-
-    const skippedSong = queue.tracks[0].title;
-    queue.intentionalStop = true;
-    queue.player.stop(); // This triggers the Idle event which plays the next song
-    message.channel.send({ embeds: [createSuccessEmbed(`Skipped: **${skippedSong}**`)] }).catch(() => {});
+    handleSkip(message.guild.id, (msg) => message.channel.send(msg).catch(() => {}));
+  },
+  async slashExecute(interaction) {
+    await interaction.deferReply({ ephemeral: true });
+    handleSkip(interaction.guildId, (msg) => interaction.editReply(msg).catch(() => {}));
   },
 };

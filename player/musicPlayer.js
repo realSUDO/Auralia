@@ -20,15 +20,7 @@ const queueHistory = new Map(); // Store last 10 songs per guild
  * Enqueue a track and start playing if idle
  */
 function enqueueTrack(guildId, track, client, textChannel) {
-	const enqueueStartTime = process.hrtime.bigint();
-	console.log(`[${new Date().toLocaleTimeString()}] enqueueTrack called for: ${track.title}`);
-	
-	// Defer ALL operations to not block current playback
 	setImmediate(() => {
-		const deferredStartTime = process.hrtime.bigint();
-		const deferDelay = Number(deferredStartTime - enqueueStartTime) / 1000000;
-		console.log(`[${new Date().toLocaleTimeString()}] enqueueTrack deferred execution started (delay: ${deferDelay.toFixed(2)}ms)`);
-		
 		let queue = queueMap.get(guildId);
 
 		if (!queue) {
@@ -66,45 +58,25 @@ function enqueueTrack(guildId, track, client, textChannel) {
 		}
 
 		queue.tracks.push(track);
-		
-		// Clear inactivity timer when new track is added
-		if (queue.aloneTimer) {
-			clearTimeout(queue.aloneTimer);
-			queue.aloneTimer = null;
-		}
-		
-		console.log(`[${new Date().toLocaleTimeString()}] Track added to queue. Queue length: ${queue.tracks.length}`);
+		if (queue.aloneTimer) { clearTimeout(queue.aloneTimer); queue.aloneTimer = null; }
 
 		if (!queue.playing) {
 			queue.playing = true;
-			console.log(`[${new Date().toLocaleTimeString()}] Starting playback...`);
 			startPlaying(guildId, client).catch(err => {
 				console.error("Error starting playback:", err);
 				queue.playing = false;
 				queue.tracks = [];
 			});
 		} else {
-			console.log(`[${new Date().toLocaleTimeString()}] Already playing, track queued`);
-			// If already playing and this is the next song, start preloading
+			console.log(`[${new Date().toLocaleTimeString()}] Queued: ${track.title} (${queue.tracks.length} in queue)`);
 			if (queue.tracks.length === 2) {
 				setImmediate(() => {
 					const q = queueMap.get(guildId);
-					if (q && q.tracks.length >= 2) {
-						console.log(`[${new Date().toLocaleTimeString()}] Starting preload for next track`);
-						preloadNextTrack(guildId, q.tracks[1], q);
-					}
+					if (q && q.tracks.length >= 2) preloadNextTrack(guildId, q.tracks[1], q);
 				});
 			}
 		}
-		
-		const deferredEndTime = process.hrtime.bigint();
-		const deferredDuration = Number(deferredEndTime - deferredStartTime) / 1000000;
-		console.log(`[${new Date().toLocaleTimeString()}] enqueueTrack deferred execution completed (took: ${deferredDuration.toFixed(2)}ms)`);
 	});
-	
-	const enqueueEndTime = process.hrtime.bigint();
-	const enqueueDuration = Number(enqueueEndTime - enqueueStartTime) / 1000000;
-	console.log(`[${new Date().toLocaleTimeString()}] enqueueTrack returned (took: ${enqueueDuration.toFixed(2)}ms)`);
 }
 
 /**
@@ -121,8 +93,7 @@ async function startPlaying(guildId, client) {
 		return;
 	}
 
-	console.log("Track URL:", track.url);
-	console.log(`[${new Date().toLocaleTimeString()}] Starting to play: ${track.title}`);
+	console.log(`[${new Date().toLocaleTimeString()}] ▶ Now playing: ${track.title}`);
 
 	// Store current track and duration if available
 	queue.currentTrack = track;
@@ -149,24 +120,16 @@ async function startPlaying(guildId, client) {
 	// If no active voice connection, join and setup the player
 	if (!queue.connection) {
 		const guild = client.guilds.cache.get(guildId);
-		if (!guild) {
-			console.log(`[${new Date().toLocaleTimeString()}] Guild not found: ${guildId}`);
-			return;
-		}
+		if (!guild) return;
 
 		const member = guild.members.cache.get(track.requester.id);
 		if (!member || !member.voice.channel) {
-			console.log(`[${new Date().toLocaleTimeString()}] User not in voice channel`);
-			queue.textChannel?.send(
-				"You need to be in a voice channel to play music!",
-			);
+			queue.textChannel?.send("You need to be in a voice channel to play music!");
 			return;
 		}
 
-		console.log(`[${new Date().toLocaleTimeString()}] Joining voice channel: ${member.voice.channel.name}`);
+		console.log(`[${new Date().toLocaleTimeString()}] Joining VC: ${member.voice.channel.name}`);
 		queue.voiceChannel = member.voice.channel;
-		
-		console.log(`[${new Date().toLocaleTimeString()}] Creating voice connection...`);
 		
 		queue.connection = joinVoiceChannel({
 			channelId: queue.voiceChannel.id,
@@ -176,27 +139,22 @@ async function startPlaying(guildId, client) {
 			selfMute: false,
 		});
 
-		console.log(`[${new Date().toLocaleTimeString()}] Voice connection created, state: ${queue.connection.state.status}`);
-		
 		queue.connection.on('stateChange', (oldState, newState) => {
-			console.log(`[${new Date().toLocaleTimeString()}] Voice state: ${oldState.status} -> ${newState.status}`);
+			if (oldState.status !== newState.status)
+				console.log(`[${new Date().toLocaleTimeString()}] Voice: ${oldState.status} → ${newState.status}`);
 		});
 		
 		try {
-			console.log(`[${new Date().toLocaleTimeString()}] Waiting for Ready state...`);
 			await entersState(queue.connection, VoiceConnectionStatus.Ready, 45_000);
-			console.log(`[${new Date().toLocaleTimeString()}] Voice connection ready!`);
+			console.log(`[${new Date().toLocaleTimeString()}] Voice connected`);
 		} catch (err) {
-			console.error(`[${new Date().toLocaleTimeString()}] Failed to reach Ready state:`, err.message);
-			console.log(`[${new Date().toLocaleTimeString()}] Final state: ${queue.connection.state.status}`);
+			console.error(`[${new Date().toLocaleTimeString()}] Voice connection failed: ${err.message}`);
 			
-			// Discord Cloudflare migration workaround - try multiple reconnects
 			for (let attempt = 1; attempt <= 3; attempt++) {
 				try {
 					console.log(`[${new Date().toLocaleTimeString()}] Reconnect attempt ${attempt}/3...`);
 					queue.connection.destroy();
 					await new Promise(resolve => setTimeout(resolve, 2000));
-					
 					queue.connection = joinVoiceChannel({
 						channelId: queue.voiceChannel.id,
 						guildId: guildId,
@@ -204,14 +162,13 @@ async function startPlaying(guildId, client) {
 						selfDeaf: false,
 						selfMute: false,
 					});
-					
 					await entersState(queue.connection, VoiceConnectionStatus.Ready, 30_000);
-					console.log(`[${new Date().toLocaleTimeString()}] Reconnect successful on attempt ${attempt}!`);
+					console.log(`[${new Date().toLocaleTimeString()}] Reconnected on attempt ${attempt}`);
 					break;
 				} catch (retryErr) {
 					if (attempt === 3) {
 						console.error(`[${new Date().toLocaleTimeString()}] All reconnect attempts failed`);
-						queue.textChannel?.send("❌ Voice connection failed. Discord is experiencing issues with their Cloudflare migration. Try again in a few minutes.").catch(() => {});
+						queue.textChannel?.send("❌ Voice connection failed. Try again in a few minutes.").catch(() => {});
 						safeDestroy(queue);
 						queueMap.delete(guildId);
 						return;
@@ -222,16 +179,13 @@ async function startPlaying(guildId, client) {
 		
 		// Handle disconnection (kicked/moved)
 		queue.connection.on(VoiceConnectionStatus.Disconnected, async () => {
-			console.log(`[${new Date().toLocaleTimeString()}] Voice connection disconnected, attempting to reconnect...`);
 			try {
 				await Promise.race([
 					entersState(queue.connection, VoiceConnectionStatus.Signalling, 5_000),
 					entersState(queue.connection, VoiceConnectionStatus.Connecting, 5_000),
 				]);
-				console.log(`[${new Date().toLocaleTimeString()}] Reconnection successful`);
 			} catch {
-				// Disconnected permanently
-				console.log(`[${new Date().toLocaleTimeString()}] Bot disconnected from voice channel permanently`);
+				console.log(`[${new Date().toLocaleTimeString()}] Disconnected from voice channel`);
 				
 				const q = queueMap.get(guildId);
 				if (q) {
@@ -278,13 +232,7 @@ async function startPlaying(guildId, client) {
 
 		// Attach player events ONCE
 		queue.player.on(AudioPlayerStatus.Idle, () => {
-			// Ignore Idle if we're seeking
-			if (queue.isSeeking) {
-				console.log(`[${new Date().toLocaleTimeString()}] Ignoring Idle - seeking in progress`);
-				return;
-			}
-			
-			console.log(`[${new Date().toLocaleTimeString()}] Player status: Idle (song ended)`);
+			if (queue.isSeeking) return;
 			
 			// Clear progress interval
 			if (queue.progressInterval) {
@@ -300,37 +248,29 @@ async function startPlaying(guildId, client) {
 			
 			queue.intentionalStop = false;
 			
-			// Handle replay mode
 			if (queue.isReplaying) {
-				console.log(`[${new Date().toLocaleTimeString()}] Replaying current track`);
 				queue.isReplaying = false;
 				startPlaying(guildId, client);
 				return;
 			}
 			
-			// Handle previous mode (don't shift, just play tracks[0])
 			if (queue.isPrevious) {
-				console.log(`[${new Date().toLocaleTimeString()}] Playing previous track`);
 				queue.isPrevious = false;
 				startPlaying(guildId, client);
 				return;
 			}
 			
-			// Handle loop mode
 			if (queue.isLooping && queue.currentTrack) {
-				console.log(`[${new Date().toLocaleTimeString()}] Looping current track`);
 				queue.tracks.unshift(queue.currentTrack);
 				startPlaying(guildId, client);
 				return;
 			}
 			
 			queue.tracks.shift();
-			// Don't cleanup here - let startPlaying handle it
 			if (queue.tracks.length > 0) {
-				console.log(`[${new Date().toLocaleTimeString()}] Playing next track from queue`);
 				startPlaying(guildId, client);
 			} else {
-				console.log(`[${new Date().toLocaleTimeString()}] Queue empty, playback stopped`);
+				console.log(`[${new Date().toLocaleTimeString()}] Queue finished`);
 				cleanupPreload(queue);
 				queue.playing = false;
 				
@@ -346,21 +286,14 @@ async function startPlaying(guildId, client) {
 		});
 		
 		queue.player.on(AudioPlayerStatus.Playing, () => {
-			console.log(`[${new Date().toLocaleTimeString()}] Player status: Playing`);
-			if (queue.isPaused) {
-				// Resuming: reset start time so elapsed continues from saved offset
-				queue.playbackStartTime = Date.now();
-			}
+			if (queue.isPaused) queue.playbackStartTime = Date.now();
 			queue.isPaused = false;
-			// Only update UI if we already have a player message (for pause/resume)
 			if (queue.currentTrack && queue.playerMessage) {
 				updatePlayerUI(queue, queue.currentTrack, queue.textChannel).catch(console.error);
 			}
 		});
 		
 		queue.player.on(AudioPlayerStatus.Paused, () => {
-			console.log(`[${new Date().toLocaleTimeString()}] Player status: Paused`);
-			// Snapshot elapsed time into offset so progress bar freezes correctly
 			if (queue.playbackStartTime) {
 				queue.playbackOffset += (Date.now() - queue.playbackStartTime) / 1000;
 				queue.playbackStartTime = null;
@@ -401,7 +334,7 @@ async function startPlaying(guildId, client) {
 	// Check if this track is preloaded
 	const preloaded = isTrackPreloaded(queue, track.url);
 	if (preloaded) {
-		console.log(`[${new Date().toLocaleTimeString()}] Using preloaded file for: ${track.title}`);
+		console.log(`[${new Date().toLocaleTimeString()}] Using preloaded: ${track.title}`);
 		stream = fs.createReadStream(preloaded.data.filePath);
 		queue.currentStream = stream;
 		
@@ -427,24 +360,15 @@ async function startPlaying(guildId, client) {
 		// Delete file after a short delay to ensure stream has started
 		setTimeout(() => {
 			try {
-				if (fs.existsSync(fileToDelete)) {
-					fs.unlinkSync(fileToDelete);
-					console.log(`[${new Date().toLocaleTimeString()}] Cleaned up preload file`);
-				}
+				if (fs.existsSync(fileToDelete)) fs.unlinkSync(fileToDelete);
 			} catch (e) {
 				console.error("Error cleaning preload file:", e.message);
 			}
 		}, 2000);
 		
-		// Preload current, next and previous tracks
-		preloadCurrentTrack(guildId, track, queue);
-		if (queue.tracks.length > 1) {
-			preloadNextTrack(guildId, queue.tracks[1], queue);
-		}
+		if (queue.tracks.length > 1) preloadNextTrack(guildId, queue.tracks[1], queue);
 		const history = queueHistory.get(guildId);
-		if (history && history.length >= 2) {
-			preloadPreviousTrack(guildId, history[history.length - 2], queue);
-		}
+		if (history && history.length >= 2) preloadPreviousTrack(guildId, history[history.length - 2], queue);
 		
 		return;
 	}
@@ -478,49 +402,22 @@ async function startPlaying(guildId, client) {
 		}).catch(() => {});
 		
 		let streamStarted = false;
-		
-		// Wait for stream to actually start before playing
 		stream.once('readable', () => {
 			if (streamStarted || queue.intentionalStop) return;
 			streamStarted = true;
-			
-			console.log(`[${new Date().toLocaleTimeString()}] Stream readable, creating audio resource`);
 			const resource = createAudioResource(stream, { inlineVolume: true });
 			resource.volume.setVolume((queue.volume || 100) / 100);
-			
-			console.log(`[${new Date().toLocaleTimeString()}] Starting audio player`);
 			queue.player.play(resource);
 			queue.playbackStartTime = Date.now();
-			
-			console.log(`[${new Date().toLocaleTimeString()}] Audio player started successfully`);
-			
-			// Update player UI
 			updatePlayerUI(queue, track, queue.textChannel).catch(console.error);
-			
-			// Start preloading next and previous tracks (current already started above)
-			if (queue.tracks.length > 1) {
-				console.log(`[${new Date().toLocaleTimeString()}] Triggering preload for next track`);
-				preloadNextTrack(guildId, queue.tracks[1], queue);
-			}
+			if (queue.tracks.length > 1) preloadNextTrack(guildId, queue.tracks[1], queue);
 			const history = queueHistory.get(guildId);
-			if (history && history.length >= 2) {
-				console.log(`[${new Date().toLocaleTimeString()}] Triggering preload for previous track`);
-				// Preload the actual previous song (second to last in history)
-				preloadPreviousTrack(guildId, history[history.length - 2], queue);
-			}
+			if (history && history.length >= 2) preloadPreviousTrack(guildId, history[history.length - 2], queue);
 		});
 		
 		stream.once("error", (error) => {
 			if (queue.cleanupInProgress || queue.intentionalStop || queue.currentStream !== stream) return;
-			
-			console.error("ytdl stream error:", error.message);
-
-			// Ignore premature close if playback already started successfully
-			if (error.message.includes("Premature close") && streamStarted) {
-				console.log(`[${new Date().toLocaleTimeString()}] Ignoring premature close - playback already started`);
-				return;
-			}
-			
+			if (error.message.includes("Premature close") && streamStarted) return;
 			queue.cleanupInProgress = true;
 
 			if (
@@ -697,7 +594,7 @@ async function seekTrack(guildId, offsetSeconds, client) {
 	let newPosition = currentPosition + offsetSeconds;
 	newPosition = Math.max(0, Math.min(newPosition, queue.duration));
 	
-	console.log(`[${new Date().toLocaleTimeString()}] Seeking from ${currentPosition.toFixed(1)}s to ${newPosition.toFixed(1)}s`);
+	console.log(`[${new Date().toLocaleTimeString()}] Seek: ${currentPosition.toFixed(1)}s → ${newPosition.toFixed(1)}s`);
 	
 	// Set seeking flag BEFORE stopping current playback
 	queue.isSeeking = true;
@@ -716,7 +613,6 @@ async function seekTrack(guildId, offsetSeconds, client) {
 	// Reset flag after player stabilizes
 	setTimeout(() => {
 		queue.isSeeking = false;
-		console.log(`[${new Date().toLocaleTimeString()}] Seek completed`);
 	}, 1500);
 	
 	return true;
@@ -864,8 +760,6 @@ function shuffleQueue(guildId) {
 function stopPlayback(guildId) {
 	const queue = queueMap.get(guildId);
 	if (!queue) return false;
-
-	console.log(`[${new Date().toLocaleTimeString()}] Stopping playback for guild ${guildId}`);
 	
 	// Clear player message
 	if (queue.playerMessage) {
