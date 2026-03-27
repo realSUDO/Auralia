@@ -149,42 +149,89 @@ async function startPlaying(guildId, client) {
 	// If no active voice connection, join and setup the player
 	if (!queue.connection) {
 		const guild = client.guilds.cache.get(guildId);
-		if (!guild) return;
+		if (!guild) {
+			console.log(`[${new Date().toLocaleTimeString()}] Guild not found: ${guildId}`);
+			return;
+		}
 
 		const member = guild.members.cache.get(track.requester.id);
 		if (!member || !member.voice.channel) {
+			console.log(`[${new Date().toLocaleTimeString()}] User not in voice channel`);
 			queue.textChannel?.send(
 				"You need to be in a voice channel to play music!",
 			);
 			return;
 		}
 
+		console.log(`[${new Date().toLocaleTimeString()}] Joining voice channel: ${member.voice.channel.name}`);
 		queue.voiceChannel = member.voice.channel;
+		
+		console.log(`[${new Date().toLocaleTimeString()}] Creating voice connection...`);
+		
 		queue.connection = joinVoiceChannel({
 			channelId: queue.voiceChannel.id,
-			guildId,
+			guildId: guildId,
 			adapterCreator: guild.voiceAdapterCreator,
+			selfDeaf: false,
+			selfMute: false,
 		});
 
+		console.log(`[${new Date().toLocaleTimeString()}] Voice connection created, state: ${queue.connection.state.status}`);
+		
+		queue.connection.on('stateChange', (oldState, newState) => {
+			console.log(`[${new Date().toLocaleTimeString()}] Voice state: ${oldState.status} -> ${newState.status}`);
+		});
+		
 		try {
-			await entersState(queue.connection, VoiceConnectionStatus.Ready, 15_000);
-		} catch {
-			queue.textChannel?.send("Failed to join voice channel.").catch(() => {});
-			safeDestroy(queue);
-			queueMap.delete(guildId);
-			return;
+			console.log(`[${new Date().toLocaleTimeString()}] Waiting for Ready state...`);
+			await entersState(queue.connection, VoiceConnectionStatus.Ready, 45_000);
+			console.log(`[${new Date().toLocaleTimeString()}] Voice connection ready!`);
+		} catch (err) {
+			console.error(`[${new Date().toLocaleTimeString()}] Failed to reach Ready state:`, err.message);
+			console.log(`[${new Date().toLocaleTimeString()}] Final state: ${queue.connection.state.status}`);
+			
+			// Discord Cloudflare migration workaround - try multiple reconnects
+			for (let attempt = 1; attempt <= 3; attempt++) {
+				try {
+					console.log(`[${new Date().toLocaleTimeString()}] Reconnect attempt ${attempt}/3...`);
+					queue.connection.destroy();
+					await new Promise(resolve => setTimeout(resolve, 2000));
+					
+					queue.connection = joinVoiceChannel({
+						channelId: queue.voiceChannel.id,
+						guildId: guildId,
+						adapterCreator: guild.voiceAdapterCreator,
+						selfDeaf: false,
+						selfMute: false,
+					});
+					
+					await entersState(queue.connection, VoiceConnectionStatus.Ready, 30_000);
+					console.log(`[${new Date().toLocaleTimeString()}] Reconnect successful on attempt ${attempt}!`);
+					break;
+				} catch (retryErr) {
+					if (attempt === 3) {
+						console.error(`[${new Date().toLocaleTimeString()}] All reconnect attempts failed`);
+						queue.textChannel?.send("❌ Voice connection failed. Discord is experiencing issues with their Cloudflare migration. Try again in a few minutes.").catch(() => {});
+						safeDestroy(queue);
+						queueMap.delete(guildId);
+						return;
+					}
+				}
+			}
 		}
 		
 		// Handle disconnection (kicked/moved)
 		queue.connection.on(VoiceConnectionStatus.Disconnected, async () => {
+			console.log(`[${new Date().toLocaleTimeString()}] Voice connection disconnected, attempting to reconnect...`);
 			try {
 				await Promise.race([
 					entersState(queue.connection, VoiceConnectionStatus.Signalling, 5_000),
 					entersState(queue.connection, VoiceConnectionStatus.Connecting, 5_000),
 				]);
+				console.log(`[${new Date().toLocaleTimeString()}] Reconnection successful`);
 			} catch {
 				// Disconnected permanently
-				console.log(`[${new Date().toLocaleTimeString()}] Bot disconnected from voice channel`);
+				console.log(`[${new Date().toLocaleTimeString()}] Bot disconnected from voice channel permanently`);
 				
 				const q = queueMap.get(guildId);
 				if (q) {
@@ -214,6 +261,7 @@ async function startPlaying(guildId, client) {
 					if (q.player) q.player.stop();
 					safeDestroy(q);
 					queueMap.delete(guildId);
+					queueHistory.delete(guildId);
 				}
 			}
 		});
@@ -299,6 +347,10 @@ async function startPlaying(guildId, client) {
 		
 		queue.player.on(AudioPlayerStatus.Playing, () => {
 			console.log(`[${new Date().toLocaleTimeString()}] Player status: Playing`);
+			if (queue.isPaused) {
+				// Resuming: reset start time so elapsed continues from saved offset
+				queue.playbackStartTime = Date.now();
+			}
 			queue.isPaused = false;
 			// Only update UI if we already have a player message (for pause/resume)
 			if (queue.currentTrack && queue.playerMessage) {
@@ -308,6 +360,11 @@ async function startPlaying(guildId, client) {
 		
 		queue.player.on(AudioPlayerStatus.Paused, () => {
 			console.log(`[${new Date().toLocaleTimeString()}] Player status: Paused`);
+			// Snapshot elapsed time into offset so progress bar freezes correctly
+			if (queue.playbackStartTime) {
+				queue.playbackOffset += (Date.now() - queue.playbackStartTime) / 1000;
+				queue.playbackStartTime = null;
+			}
 			queue.isPaused = true;
 			if (queue.currentTrack && queue.playerMessage) {
 				updatePlayerUI(queue, queue.currentTrack, queue.textChannel).catch(console.error);
@@ -519,6 +576,7 @@ function skipTrack(queue, guildId, client) {
 		
 		safeDestroy(queue);
 		queueMap.delete(guildId);
+		queueHistory.delete(guildId);
 	}
 }
 
@@ -540,6 +598,7 @@ function safeDestroy(queue) {
 		} catch (e) {
 			// Already destroyed
 		}
+		queue.connection = null;
 	}
 }
 
@@ -594,6 +653,7 @@ function startAloneMonitoring(guildId, client) {
 						if (q.player) q.player.stop();
 						safeDestroy(q);
 						queueMap.delete(guildId);
+						queueHistory.delete(guildId);
 					}
 				}, 60000); // 1 minute
 			}

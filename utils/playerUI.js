@@ -64,22 +64,22 @@ function createPlaybackButtons(queue) {
 	return new ActionRowBuilder().addComponents(
 		new ButtonBuilder()
 			.setCustomId(`previous_${guildId}`)
-			.setEmoji("⏮️")
+			.setEmoji({ id: '1486986486309195797' })
 			.setStyle(ButtonStyle.Secondary),
 		
 		new ButtonBuilder()
 			.setCustomId(`pause_${guildId}`)
-			.setEmoji(queue.isPaused ? "▶️" : "⏸️")
+			.setEmoji({ id: queue.isPaused ? '1486988423280722061' : '1486988421158404236' })
 			.setStyle(ButtonStyle.Primary),
 		
 		new ButtonBuilder()
 			.setCustomId(`skip_${guildId}`)
-			.setEmoji("⏭️")
+			.setEmoji({ id: '1486986864333164615' })
 			.setStyle(ButtonStyle.Secondary),
 		
 		new ButtonBuilder()
 			.setCustomId(`loop_${guildId}`)
-			.setEmoji("🔂")
+			.setEmoji({ id: '1486988419052732458' })
 			.setStyle(queue.isLooping ? ButtonStyle.Success : ButtonStyle.Secondary)
 	);
 }
@@ -93,24 +93,24 @@ function createSystemButtons(queue) {
 	return new ActionRowBuilder().addComponents(
 		new ButtonBuilder()
 			.setCustomId(`replay_${guildId}`)
-			.setEmoji("🔁")
+			.setEmoji({ id: '1486988430864027759' })
 			.setStyle(ButtonStyle.Secondary)
 			.setDisabled(!queue.currentTrack),
 		
 		new ButtonBuilder()
 			.setCustomId(`shuffle_${guildId}`)
-			.setEmoji("🔀")
+			.setEmoji({ id: '1486988433175089372' })
 			.setStyle(ButtonStyle.Secondary)
 			.setDisabled(queue.tracks.length <= 1),
 		
 		new ButtonBuilder()
 			.setCustomId(`queue_${guildId}`)
-			.setEmoji("📜")
+			.setEmoji({ id: '1486988425398583336' })
 			.setStyle(ButtonStyle.Secondary),
 		
 		new ButtonBuilder()
 			.setCustomId(`stop_${guildId}`)
-			.setEmoji("⏹️")
+			.setEmoji({ id: '1486988434969985034' })
 			.setStyle(ButtonStyle.Danger)
 	);
 }
@@ -125,15 +125,13 @@ function createVolumeButtons(queue) {
 	return new ActionRowBuilder().addComponents(
 		new ButtonBuilder()
 			.setCustomId(`volume_down_${guildId}`)
-			.setEmoji("🔉")
-			.setLabel(`➖`)
+			.setEmoji({ id: '1486988437822242919' })
 			.setStyle(ButtonStyle.Secondary)
 			.setDisabled(currentVolume <= 0),
 		
 		new ButtonBuilder()
 			.setCustomId(`volume_up_${guildId}`)
-			.setEmoji("🔊")
-			.setLabel(`➕`)
+			.setEmoji({ id: '1486988442901544971' })
 			.setStyle(ButtonStyle.Secondary)
 			.setDisabled(currentVolume >= 100)
 	);

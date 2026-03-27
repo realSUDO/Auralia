@@ -57,7 +57,7 @@ module.exports = {
 					
 					queue.intentionalStop = true;
 					queue.player.stop();
-					await interaction.update({});
+					await interaction.update({}).catch(() => {});
 				}
 				break;
 			
@@ -69,26 +69,26 @@ module.exports = {
 					queue.player.unpause();
 					queue.isPaused = false;
 				}
-				await interaction.update({});
+				await interaction.update({}).catch(() => {});
 				updatePlayerUI(queue, queue.currentTrack, queue.textChannel).catch(console.error);
 				break;
 			
 			case "skip":
 				queue.intentionalStop = true;
 				queue.player.stop();
-				await interaction.update({});
+				await interaction.update({}).catch(() => {});
 				break;
 			
 			case "loop":
 				queue.isLooping = !queue.isLooping;
-				await interaction.update({});
+				await interaction.update({}).catch(() => {});
 				updatePlayerUI(queue, queue.currentTrack, queue.textChannel).catch(console.error);
 				break;
 			
 			case "replay":
 				const replayed = replayCurrentSong(interaction.guildId);
 				if (replayed) {
-					await interaction.update({});
+					await interaction.update({}).catch(() => {});
 					queue.textChannel?.send({ embeds: [createSuccessEmbed("🔁 Replaying current song...")] }).catch(() => {});
 				} else {
 					await interaction.reply({ embeds: [createErrorEmbed("Nothing to replay!")], flags: 64 });
@@ -98,7 +98,7 @@ module.exports = {
 			case "shuffle":
 				const shuffled = shuffleQueue(interaction.guildId);
 				if (shuffled) {
-					await interaction.update({});
+					await interaction.update({}).catch(() => {});
 					updatePlayerUI(queue, queue.currentTrack, queue.textChannel).catch(console.error);
 				} else {
 					await interaction.reply({ embeds: [createErrorEmbed("Nothing to shuffle!")], flags: 64 });
@@ -209,7 +209,7 @@ module.exports = {
 			
 			case "stop":
 				stopPlayback(interaction.guildId);
-				await interaction.update({});
+				await interaction.update({}).catch(() => {});
 				break;
 			
 			case "volume_up":
@@ -218,7 +218,7 @@ module.exports = {
 				if (queue.player.state.resource) {
 					queue.player.state.resource.volume.setVolume(newVolumeUp / 100);
 				}
-				await interaction.update({});
+				await interaction.update({}).catch(() => {});
 				updatePlayerUI(queue, queue.currentTrack, queue.textChannel).catch(console.error);
 				break;
 			
@@ -228,7 +228,7 @@ module.exports = {
 				if (queue.player.state.resource) {
 					queue.player.state.resource.volume.setVolume(newVolumeDown / 100);
 				}
-				await interaction.update({});
+				await interaction.update({}).catch(() => {});
 				updatePlayerUI(queue, queue.currentTrack, queue.textChannel).catch(console.error);
 				break;
 			

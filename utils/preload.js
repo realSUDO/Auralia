@@ -4,9 +4,18 @@ const { spawn } = require("child_process");
 
 const CACHE_DIR = path.join(__dirname, "../.cache");
 
-// Ensure cache directory exists
+// Ensure cache directory exists and wipe stale files from previous run
 if (!fs.existsSync(CACHE_DIR)) {
 	fs.mkdirSync(CACHE_DIR, { recursive: true });
+} else {
+	// Clean up any leftover preload files from a previous crash/restart
+	try {
+		for (const file of fs.readdirSync(CACHE_DIR)) {
+			fs.unlinkSync(path.join(CACHE_DIR, file));
+		}
+	} catch (e) {
+		console.error("Cache cleanup on startup failed:", e.message);
+	}
 }
 
 /**
@@ -38,11 +47,12 @@ function preloadCurrentTrack(guildId, currentTrack, queue) {
 	}
 
 	const filePath = path.join(CACHE_DIR, `${guildId}_current.webm`);
+	const tmpPath = filePath + '.tmp';
 	console.log(`[${new Date().toLocaleTimeString()}] Preloading current: ${currentTrack.title}`);
 
 	const ytdlp = spawn('yt-dlp', [
 		'-f', 'bestaudio',
-		'-o', filePath,
+		'-o', tmpPath,
 		'--no-playlist',
 		'--quiet',
 		currentTrack.url
@@ -51,18 +61,19 @@ function preloadCurrentTrack(guildId, currentTrack, queue) {
 	queue.preloadCurrentProcess = ytdlp;
 
 	ytdlp.on('close', (code) => {
-		if (code === 0 && fs.existsSync(filePath)) {
-			queue.preloadedCurrent = {
-				url: currentTrack.url,
-				filePath: filePath,
-			};
+		if (code === 0 && fs.existsSync(tmpPath)) {
+			try { fs.renameSync(tmpPath, filePath); } catch (e) { queue.preloadCurrentProcess = null; return; }
+			queue.preloadedCurrent = { url: currentTrack.url, filePath };
 			console.log(`[${new Date().toLocaleTimeString()}] Preloaded current: ${currentTrack.title}`);
+		} else {
+			fs.unlink(tmpPath, () => {});
 		}
 		queue.preloadCurrentProcess = null;
 	});
 
 	ytdlp.on('error', (error) => {
 		console.error("Current preload error:", error.message);
+		fs.unlink(tmpPath, () => {});
 		queue.preloadCurrentProcess = null;
 	});
 }
@@ -96,11 +107,12 @@ function preloadNextTrack(guildId, nextTrack, queue) {
 	}
 
 	const filePath = path.join(CACHE_DIR, `${guildId}_next.webm`);
+	const tmpPath = filePath + '.tmp';
 	console.log(`[${new Date().toLocaleTimeString()}] Preloading next: ${nextTrack.title}`);
 
 	const ytdlp = spawn('yt-dlp', [
 		'-f', 'bestaudio',
-		'-o', filePath,
+		'-o', tmpPath,
 		'--no-playlist',
 		'--quiet',
 		nextTrack.url
@@ -109,18 +121,19 @@ function preloadNextTrack(guildId, nextTrack, queue) {
 	queue.preloadNextProcess = ytdlp;
 
 	ytdlp.on('close', (code) => {
-		if (code === 0 && fs.existsSync(filePath)) {
-			queue.preloadedNext = {
-				url: nextTrack.url,
-				filePath: filePath,
-			};
+		if (code === 0 && fs.existsSync(tmpPath)) {
+			try { fs.renameSync(tmpPath, filePath); } catch (e) { queue.preloadNextProcess = null; return; }
+			queue.preloadedNext = { url: nextTrack.url, filePath };
 			console.log(`[${new Date().toLocaleTimeString()}] Preloaded next: ${nextTrack.title}`);
+		} else {
+			fs.unlink(tmpPath, () => {});
 		}
 		queue.preloadNextProcess = null;
 	});
 
 	ytdlp.on('error', (error) => {
 		console.error("Next preload error:", error.message);
+		fs.unlink(tmpPath, () => {});
 		queue.preloadNextProcess = null;
 	});
 }
@@ -154,11 +167,12 @@ function preloadPreviousTrack(guildId, previousTrack, queue) {
 	}
 
 	const filePath = path.join(CACHE_DIR, `${guildId}_prev.webm`);
+	const tmpPath = filePath + '.tmp';
 	console.log(`[${new Date().toLocaleTimeString()}] Preloading previous: ${previousTrack.title}`);
 
 	const ytdlp = spawn('yt-dlp', [
 		'-f', 'bestaudio',
-		'-o', filePath,
+		'-o', tmpPath,
 		'--no-playlist',
 		'--quiet',
 		previousTrack.url
@@ -167,18 +181,19 @@ function preloadPreviousTrack(guildId, previousTrack, queue) {
 	queue.preloadPrevProcess = ytdlp;
 
 	ytdlp.on('close', (code) => {
-		if (code === 0 && fs.existsSync(filePath)) {
-			queue.preloadedPrev = {
-				url: previousTrack.url,
-				filePath: filePath,
-			};
+		if (code === 0 && fs.existsSync(tmpPath)) {
+			try { fs.renameSync(tmpPath, filePath); } catch (e) { queue.preloadPrevProcess = null; return; }
+			queue.preloadedPrev = { url: previousTrack.url, filePath };
 			console.log(`[${new Date().toLocaleTimeString()}] Preloaded previous: ${previousTrack.title}`);
+		} else {
+			fs.unlink(tmpPath, () => {});
 		}
 		queue.preloadPrevProcess = null;
 	});
 
 	ytdlp.on('error', (error) => {
 		console.error("Previous preload error:", error.message);
+		fs.unlink(tmpPath, () => {});
 		queue.preloadPrevProcess = null;
 	});
 }

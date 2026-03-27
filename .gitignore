@@ -8,3 +8,4 @@ config.json
 node_modules/
 config.json
 .env
+*-player-script.js
