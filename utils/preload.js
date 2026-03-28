@@ -66,6 +66,15 @@ function preloadCurrentTrack(guildId, currentTrack, queue) {
 		if (code === 0 && fs.existsSync(tmpPath)) {
 			try { fs.renameSync(tmpPath, filePath); } catch (e) { queue.preloadCurrentProcess = null; return; }
 			queue.preloadedCurrent = { url: currentTrack.url, filePath };
+			fetchDuration(currentTrack.url).then(duration => {
+				if (queue.preloadedCurrent?.url === currentTrack.url) queue.preloadedCurrent.duration = duration;
+				// Also patch queue.duration live if this is still the playing track
+				const { queueMap } = require('../player/musicPlayer');
+				const guildQueue = queueMap.get(guildId);
+				if (guildQueue && guildQueue.currentTrack?.url === currentTrack.url && !guildQueue.duration) {
+					guildQueue.duration = duration;
+				}
+			});
 		} else {
 			fs.unlink(tmpPath, () => {});
 		}
