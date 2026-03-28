@@ -32,6 +32,9 @@ client.queueMap = new Map(); // This will hold the queue for each server
 	for (const file of commandFiles) {
 		const command = require(`./commands/${file}`);
 		client.commands.set(command.name, command);
+		if (command.aliases) {
+			for (const alias of command.aliases) client.commands.set(alias, command);
+		}
 	} // This makes it easy to run a command by name without using a bunch of if statements
 
 // Load all the events dynamically from the events folder

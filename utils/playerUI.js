@@ -20,30 +20,46 @@ function createProgressBar(current, total, length = 15) {
 }
 
 /**
+ * Snake-style bouncing bar for livestreams.
+ * Single ▰ bounces left→right→left across ▱▱▱▱▱
+ */
+function createLivestreamBar(tick, length = 15) {
+	const filled = 3;
+	const pos = tick % length;
+	let bar = '▱'.repeat(length);
+	let arr = bar.split('');
+	for (let i = 0; i < filled; i++) {
+		arr[(pos + i) % length] = '▰';
+	}
+	return arr.join('');
+}
+
+/**
  * Create now playing embed with progress
  */
 function createNowPlayingEmbed(track, queue) {
 	const embed = new EmbedBuilder()
-		.setTitle("🎵 Now Playing")
+		.setTitle(track.isAutoPlaySong ? "🎵 Now Playing (autoplay)" : "🎵 Now Playing")
 		.setDescription(`**${track.title}**`)
 		.setColor(queue.isPaused ? 0xff9900 : 0x00ffcc);
-	
-	// Add progress bar if we have duration
-	if (queue.duration > 0 && queue.playbackStartTime) {
-		const elapsed = queue.isPaused 
-			? queue.playbackOffset 
+
+	if (track.livestream) {
+		const tick = Math.floor((Date.now() - (queue.playbackStartTime || Date.now())) / 1000);
+		embed.addFields({ name: "📻 Live", value: createLivestreamBar(tick), inline: false });
+	} else if (queue.duration > 0 && queue.playbackStartTime) {
+		const elapsed = queue.isPaused
+			? queue.playbackOffset
 			: queue.playbackOffset + (Date.now() - queue.playbackStartTime) / 1000;
-		const progressBar = createProgressBar(elapsed, queue.duration);
 		embed.addFields({
 			name: "Progress",
-			value: `${progressBar} ${formatTime(elapsed)} / ${formatTime(queue.duration)}`,
+			value: `${createProgressBar(elapsed, queue.duration)} ${formatTime(elapsed)} / ${formatTime(queue.duration)}`,
 			inline: false
 		});
 	}
 	
 	embed.addFields(
-		{ name: "Requested by", value: track.requester.username, inline: true },
-		{ name: "Queue", value: `${queue.tracks.length} song(s)`, inline: true }
+		{ name: "Requested by", value: track.requester?.username || 'Unknown', inline: true },
+		{ name: "Queue", value: queue.moodActive ? '∞ song(s)' : `${Math.max(0, queue.tracks.length - 1) + (queue.autoplaySuggestion ? 1 : 0)} song(s)`, inline: true }
 	);
 	
 	if (queue.isPaused) {
@@ -116,25 +132,70 @@ function createSystemButtons(queue) {
 }
 
 /**
- * Create volume control buttons (Row 3: Volume)
+ * Create volume + autoplay buttons (Row 3)
  */
 function createVolumeButtons(queue) {
 	const guildId = queue.connection?.joinConfig?.guildId || '';
 	const currentVolume = queue.volume || 100;
-	
+
 	return new ActionRowBuilder().addComponents(
 		new ButtonBuilder()
 			.setCustomId(`volume_down_${guildId}`)
 			.setEmoji({ id: '1486988437822242919' })
 			.setStyle(ButtonStyle.Secondary)
 			.setDisabled(currentVolume <= 0),
-		
+
 		new ButtonBuilder()
 			.setCustomId(`volume_up_${guildId}`)
 			.setEmoji({ id: '1486988442901544971' })
 			.setStyle(ButtonStyle.Secondary)
-			.setDisabled(currentVolume >= 100)
+			.setDisabled(currentVolume >= 100),
+
+		new ButtonBuilder()
+			.setCustomId(`autoplay_${guildId}`)
+			.setEmoji({ id: '1487342669595414580' })
+			.setLabel(queue.autoplay ? 'Autoplay: ON' : 'Autoplay: OFF')
+			.setStyle(queue.autoplay ? ButtonStyle.Success : ButtonStyle.Secondary)
 	);
+}
+
+/**
+ * Mood button (Row 4 — full width single button)
+ */
+function createAutoplayMoodButtons(queue) {
+	const guildId = queue.connection?.joinConfig?.guildId || '';
+	return new ActionRowBuilder().addComponents(
+		new ButtonBuilder()
+			.setCustomId(`moodmenu_${guildId}`)
+			.setEmoji({ id: '1487343068733509683' })
+			.setLabel(queue.moodActive ? `Mood: ${queue.moodGenre}  —  click to change` : 'Mood  —  pick a vibe')
+			.setStyle(queue.moodActive ? ButtonStyle.Success : ButtonStyle.Secondary)
+	);
+}
+
+/**
+ * Mood selection row (ephemeral reply when mood button clicked)
+ */
+function createMoodSelectionRows(guildId) {
+	const moods = [
+		{ id: 'happy', label: '😄 Happy' },
+		{ id: 'sad', label: '😢 Sad' },
+		{ id: 'energetic', label: '⚡ Energetic' },
+		{ id: 'hiphop', label: '🎤 Hip-Hop' },
+		{ id: 'lofi', label: '🌙 Lofi' },
+	];
+	const moods2 = [
+		{ id: 'metal', label: '🤘 Metal' },
+		{ id: 'lofiradio', label: '📻 Lofi Radio' },
+	];
+	const makeRow = (list) => new ActionRowBuilder().addComponents(
+		list.map(m => new ButtonBuilder()
+			.setCustomId(`moodpick_${m.id}_${guildId}`)
+			.setLabel(m.label)
+			.setStyle(ButtonStyle.Secondary)
+		)
+	);
+	return [makeRow(moods), makeRow(moods2)];
 }
 
 /**
@@ -145,33 +206,24 @@ async function updatePlayerUI(queue, track, channel) {
 	const playbackRow = createPlaybackButtons(queue);
 	const systemRow = createSystemButtons(queue);
 	const volumeRow = createVolumeButtons(queue);
-	
+	const autoplayMoodRow = createAutoplayMoodButtons(queue);
+
+	const components = [playbackRow, systemRow, volumeRow, autoplayMoodRow];
+
 	if (queue.playerMessage) {
-		// Update existing message
 		try {
-			await queue.playerMessage.edit({ 
-				embeds: [embed], 
-				components: [playbackRow, systemRow, volumeRow] 
-			});
-		} catch (error) {
-			// Message deleted or doesn't exist, send new one
+			await queue.playerMessage.edit({ embeds: [embed], components });
+		} catch {
 			try {
-				queue.playerMessage = await channel.send({ 
-					embeds: [embed], 
-					components: [playbackRow, systemRow, volumeRow] 
-				});
+				queue.playerMessage = await channel.send({ embeds: [embed], components });
 				startProgressUpdates(queue, track, channel);
 			} catch (e) {
 				console.error("Failed to send player UI:", e.message);
 			}
 		}
 	} else {
-		// Send new message
 		try {
-			queue.playerMessage = await channel.send({ 
-				embeds: [embed], 
-				components: [playbackRow, systemRow, volumeRow] 
-			});
+			queue.playerMessage = await channel.send({ embeds: [embed], components });
 			startProgressUpdates(queue, track, channel);
 		} catch (error) {
 			console.error("Failed to send player UI:", error.message);
@@ -188,26 +240,26 @@ function startProgressUpdates(queue, track, channel) {
 		clearInterval(queue.progressInterval);
 	}
 	
-	// Update every 10 seconds
+	// Update every 10 seconds (every 1s for livestreams)
+	const intervalMs = 1000;
 	queue.progressInterval = setInterval(() => {
-		if (queue.playerMessage && queue.duration > 0 && !queue.isPaused) {
+		if (queue.playerMessage && queue.currentTrack && !queue.isPaused) {
 			const embed = createNowPlayingEmbed(track, queue);
 			const playbackRow = createPlaybackButtons(queue);
 			const systemRow = createSystemButtons(queue);
 			const volumeRow = createVolumeButtons(queue);
-			
+			const autoplayMoodRow = createAutoplayMoodButtons(queue);
 			queue.playerMessage.edit({ 
 				embeds: [embed], 
-				components: [playbackRow, systemRow, volumeRow] 
+				components: [playbackRow, systemRow, volumeRow, autoplayMoodRow]
 			}).catch(() => {
-				// Message deleted, clear interval
 				if (queue.progressInterval) {
 					clearInterval(queue.progressInterval);
 					queue.progressInterval = null;
 				}
 			});
 		}
-	}, 1000);
+	}, intervalMs);
 }
 
 /**
@@ -282,6 +334,8 @@ module.exports = {
 	createPlaybackButtons,
 	createSystemButtons,
 	createVolumeButtons,
+	createAutoplayMoodButtons,
+	createMoodSelectionRows,
 	updatePlayerUI,
 	disablePlayerUI,
 	startProgressUpdates,

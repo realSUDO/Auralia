@@ -4,6 +4,7 @@ const { enqueueTrack } = require("../player/musicPlayer");
 const { searchYouTube } = require("../utils/ytSearch");
 const { getSpotifyTracks, isSpotifyReady } = require("../utils/spotify");
 const { createErrorEmbed, createSuccessEmbed, createInfoEmbed, createWarningEmbed } = require("../utils/embeds");
+const { parseTitle } = require("../utils/lastfm");
 
 function isYouTubeUrl(url) {
   return /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$/i.test(url);
@@ -17,6 +18,8 @@ function isSpotifyUrl(url) {
 
 async function handlePlay(query, user, guild, channel, client, interaction) {
   const send = (msg) => interaction ? interaction.editReply(msg).catch(() => {}) : channel.send(msg).catch(() => {});
+  const { queueMap } = require("../player/musicPlayer");
+  const isFirstSong = !queueMap.get(guild.id)?.playing;
 
   const member = guild.members.cache.get(user.id);
   if (!member?.voice.channel) return send({ embeds: [createErrorEmbed("You need to be in a voice channel!")] });
@@ -37,19 +40,25 @@ async function handlePlay(query, user, guild, channel, client, interaction) {
         const info = await ytdl.getInfo(query);
         const durationSeconds = parseInt(info.videoDetails.lengthSeconds) || 0;
         if (durationSeconds / 60 > 30) return send({ embeds: [createErrorEmbed("This is not even a song bruh! 😂")] });
-        const track = { title: info.videoDetails.title, url: query, requester: user, duration: durationSeconds };
+        const { artist: a, track: t } = parseTitle(info.videoDetails.title);
+        const track = { title: info.videoDetails.title, url: query, requester: user, duration: durationSeconds, artist: a, trackName: t };
         enqueueTrack(guild.id, track, client, channel);
-        send({ embeds: [createSuccessEmbed(`Added to queue: **${track.title}**`)] });
+        send({ embeds: [isFirstSong ? createInfoEmbed(`hollup, I'm getting ur track 🎵`) : createSuccessEmbed(`Added to queue: **${track.title}**`)] });
       }
 
     } else if (isSpotifyUrl(query)) {
       if (!isSpotifyReady()) return send({ embeds: [createErrorEmbed("Spotify API is still authorizing. Try again shortly.")] });
-      const spotifyTracks = await getSpotifyTracks(query);
+      let spotifyTracks;
+      try {
+        spotifyTracks = await getSpotifyTracks(query);
+      } catch (err) {
+        return send({ embeds: [createErrorEmbed("Couldn't fetch that Spotify link. It may be a private or curated playlist.")] });
+      }
       if (!spotifyTracks.length) return send({ embeds: [createErrorEmbed("No tracks found for this Spotify URL.")] });
       send({ embeds: [createInfoEmbed(`Found ${spotifyTracks.length} track(s). Searching YouTube...`)] });
-      for (const trackName of spotifyTracks) {
-        const result = await searchYouTube(trackName);
-        if (result) enqueueTrack(guild.id, { title: result.title, url: result.url, requester: user }, client, channel);
+      for (const t of spotifyTracks) {
+        const result = await searchYouTube(t.searchQuery).catch(() => null);
+        if (result) enqueueTrack(guild.id, { title: result.title, url: result.url, requester: user, artist: t.artist, trackName: t.trackName }, client, channel);
       }
       send({ embeds: [createSuccessEmbed(`Added ${spotifyTracks.length} track(s) from Spotify.`)] });
 
@@ -60,9 +69,10 @@ async function handlePlay(query, user, guild, channel, client, interaction) {
       const mins = (result.seconds || 0) / 60;
       if (mins > 30) return send({ embeds: [createErrorEmbed("This is not even a song bruh! 😂")] });
       if (mins > 15) return send({ embeds: [createWarningEmbed("Song too long ⚠️\nUse `!play <url>` or `/play <url>` to force play.")] });
-      const track = { title: result.title, url: result.url, requester: user, duration: result.seconds || 0 };
+      const { artist: a, track: t } = parseTitle(result.title);
+      const track = { title: result.title, url: result.url, requester: user, duration: result.seconds || 0, artist: a, trackName: t };
       enqueueTrack(guild.id, track, client, channel);
-      send({ embeds: [createSuccessEmbed(`Added to queue: **${track.title}**`)] });
+      send({ embeds: [isFirstSong ? createInfoEmbed(`hollup, I'm getting ur track 🎵`) : createSuccessEmbed(`Added to queue: **${track.title}**`)] });
     }
   } catch (err) {
     console.error(err);

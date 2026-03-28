@@ -22,18 +22,41 @@ module.exports = {
 
 		if (!interaction.isButton()) return;
 
-		// Determine action type
 		const customId = interaction.customId;
+
+		// Handle commands pagination — no queue needed
+		if (customId.startsWith('cmd_prev_') || customId.startsWith('cmd_next_')) {
+			const dir = customId.startsWith('cmd_next_') ? 1 : -1;
+			const currentPage = parseInt(customId.split('_')[2]);
+			const { buildPage } = require('../commands/commands');
+			await interaction.update(buildPage(currentPage + dir)).catch(() => {});
+			return;
+		}
+
+		// Handle mood pick — no queue check needed for the reply
+		if (customId.startsWith('moodpick_')) {
+			const parts = customId.split('_'); // moodpick_<mood>_<guildId>
+			const moodType = parts[1];
+			const { handleMoodFromButton } = require('../commands/mood');
+			await interaction.deferReply({ ephemeral: true });
+			handleMoodFromButton(moodType, interaction.user, interaction.guild, interaction.channel, client,
+				msg => interaction.editReply(msg).catch(() => {}));
+			return;
+		}
+
+		// Determine action type
 		let action;
 		
 		// Check if it's a queue pagination button
 		if (customId.startsWith('queue_prev_') || customId.startsWith('queue_next_')) {
 			action = customId.startsWith('queue_prev_') ? 'queue_prev' : 'queue_next';
 		} else if (customId.startsWith('volume_')) {
-			// Extract volume action
 			action = customId.startsWith('volume_up_') ? 'volume_up' : 'volume_down';
+		} else if (customId.startsWith('autoplay_')) {
+			action = 'autoplay';
+		} else if (customId.startsWith('moodmenu_')) {
+			action = 'moodmenu';
 		} else {
-			// Extract action from custom ID for other buttons
 			action = customId.split('_')[0];
 		}
 		
@@ -119,109 +142,57 @@ module.exports = {
 				}
 				break;
 			
-			case "queue":
-				if (queue.tracks.length === 0) {
-					await interaction.reply({ embeds: [createInfoEmbed("Queue is empty!")], flags: 64 });
-				} else {
-					const page = 1;
-					const perPage = 10;
-					const totalPages = Math.ceil(queue.tracks.length / perPage);
-					
-					const current = queue.tracks[0];
-					const upcoming = queue.tracks.slice(1, perPage + 1);
-					
-					let queueMessage = `🎵 **Now Playing:**\n${current.title}\n\n`;
-					
-					if (upcoming.length > 0) {
-						queueMessage += `**Up Next (Page ${page}/${totalPages}):**\n`;
-						upcoming.forEach((track, index) => {
-							queueMessage += `${index + 1}. ${track.title}\n`;
-						});
-					} else {
-						queueMessage += `No upcoming songs.`;
-					}
-					
-					const components = [];
-					if (totalPages > 1) {
-						const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
-						const row = new ActionRowBuilder().addComponents(
-							new ButtonBuilder()
-								.setCustomId(`queue_prev_${page}_${interaction.guildId}`)
-								.setLabel("Previous")
-								.setStyle(ButtonStyle.Secondary)
-								.setDisabled(true),
-							
-							new ButtonBuilder()
-								.setCustomId(`queue_next_${page}_${interaction.guildId}`)
-								.setLabel("Next")
-								.setStyle(ButtonStyle.Secondary)
-								.setDisabled(false)
-						);
-						components.push(row);
-					}
-					
-					await interaction.reply({ 
-						embeds: [createInfoEmbed(queueMessage)],
-						components,
-						flags: 64
-					});
-				}
+			case "queue": {
+				const { buildQueueEmbed } = require('../commands/queue');
+				await interaction.reply({ ...buildQueueEmbed(queue, 1, interaction.guildId), flags: 64 });
 				break;
-			
+			}
+
 			case "queue_prev":
-			case "queue_next":
+			case "queue_next": {
 				try {
-					const [, direction, currentPage] = interaction.customId.split('_');
-					const page = direction === 'next' ? parseInt(currentPage) + 1 : parseInt(currentPage) - 1;
-					const perPage = 10;
-					const start = (page - 1) * perPage;
-					const end = start + perPage;
-					const totalPages = Math.ceil(queue.tracks.length / perPage);
-					
-					const current = queue.tracks[0];
-					const upcoming = queue.tracks.slice(start + 1, end + 1);
-					
-					let queueMessage = page === 1 ? `🎵 **Now Playing:**\n${current.title}\n\n` : '';
-					
-					if (upcoming.length > 0) {
-						queueMessage += `**Up Next (Page ${page}/${totalPages}):**\n`;
-						upcoming.forEach((track, index) => {
-							queueMessage += `${start + index + 1}. ${track.title}\n`;
-						});
-					} else if (page === 1) {
-						queueMessage += `No upcoming songs.`;
-					}
-					
-					const components = [];
-					if (totalPages > 1) {
-						const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
-						const row = new ActionRowBuilder().addComponents(
-							new ButtonBuilder()
-								.setCustomId(`queue_prev_${page}_${interaction.guildId}`)
-								.setLabel("Previous")
-								.setStyle(ButtonStyle.Secondary)
-								.setDisabled(page === 1),
-							
-							new ButtonBuilder()
-								.setCustomId(`queue_next_${page}_${interaction.guildId}`)
-								.setLabel("Next")
-								.setStyle(ButtonStyle.Secondary)
-								.setDisabled(page === totalPages)
-						);
-						components.push(row);
-					}
-					
-					await interaction.update({ 
-						embeds: [createInfoEmbed(queueMessage)],
-						components 
-					});
+					const parts = interaction.customId.split('_');
+					const currentPage = parseInt(parts[2]);
+					const newPage = action === 'queue_next' ? currentPage + 1 : currentPage - 1;
+					const { buildQueueEmbed } = require('../commands/queue');
+					await interaction.update(buildQueueEmbed(queue, newPage, interaction.guildId));
 				} catch (error) {
 					console.error("Queue pagination error:", error);
 					await interaction.reply({ embeds: [createErrorEmbed("Failed to update queue page.")], flags: 64 }).catch(() => {});
 				}
 				break;
+			}
 			
-			case "stop":
+			case "cmd_prev":
+		case "cmd_next": {
+			const currentPage = parseInt(customId.split('_')[2]);
+			const newPage = action === 'cmd_next' ? currentPage + 1 : currentPage - 1;
+			const { buildPage } = require('../commands/commands');
+			await interaction.update(buildPage(newPage)).catch(() => {});
+			break;
+		}
+
+		case "autoplay": {
+			const { triggerAutoplayFetch } = require('../player/musicPlayer');
+			queue.autoplay = !queue.autoplay;
+			queue.autoplaySuggestion = null;
+			if (queue.autoplay) {
+				const hasUserSongsAhead = queue.tracks.slice(1).some(t => !t.isAutoPlaySong);
+				if (!hasUserSongsAhead && queue.currentTrack) triggerAutoplayFetch(interaction.guildId);
+			}
+			await interaction.update({}).catch(() => {});
+			updatePlayerUI(queue, queue.currentTrack, queue.textChannel).catch(console.error);
+			break;
+		}
+
+		case "moodmenu": {
+			const { createMoodSelectionRows } = require('../utils/playerUI');
+			const rows = createMoodSelectionRows(interaction.guildId);
+			await interaction.reply({ content: '🎭 Pick a mood:', components: rows, ephemeral: true }).catch(() => {});
+			break;
+		}
+
+		case "stop":
 				stopPlayback(interaction.guildId);
 				await interaction.update({}).catch(() => {});
 				break;

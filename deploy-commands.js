@@ -15,7 +15,16 @@ const commands = [
   new SlashCommandBuilder().setName("clear").setDescription("Clear upcoming songs from queue"),
   new SlashCommandBuilder().setName("replay").setDescription("Replay the current song"),
   new SlashCommandBuilder().setName("replayq").setDescription("Replay the last queue"),
-  new SlashCommandBuilder().setName("ping").setDescription("Check bot latency"),
+  new SlashCommandBuilder().setName("autoplay").setDescription("Toggle autoplay. Use action:off to disable.")
+    .addStringOption(o => o.setName("action").setDescription("off to disable").setRequired(false)),
+  new SlashCommandBuilder().setName("moodskip").setDescription("Skip current song and shift to a new mood"),
+  new SlashCommandBuilder().setName("lofiradio").setDescription("Start the lofi radio livestream"),
+  new SlashCommandBuilder().setName("mood").setDescription("Play a mood-based playlist")
+    .addStringOption(o => o.setName("mood").setDescription(`Mood type: happy, sad, energetic, hiphop, lofi, lofiradio, metal, strict`).setRequired(true))
+    .addBooleanOption(o => o.setName("strict").setDescription("Stay in this mood without drifting")),
+  new SlashCommandBuilder().setName("drift").setDescription("Toggle genre drift during autoplay")
+    .addStringOption(o => o.setName("enabled").setDescription("on or off").setRequired(true).addChoices({ name: "on", value: "on" }, { name: "off", value: "off" })),
+  new SlashCommandBuilder().setName("commands").setDescription("Show all available commands"),
 ].map(c => c.toJSON());
 
 const rest = new REST().setToken(token);

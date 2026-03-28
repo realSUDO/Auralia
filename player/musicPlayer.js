@@ -10,8 +10,10 @@ const {
 const fs = require("fs");
 const { spawn } = require("child_process");
 const { getDirectAudioUrl, createSeekableStream } = require("../utils/seek");
-const { preloadCurrentTrack, preloadNextTrack, preloadPreviousTrack, cleanupPreload, isTrackPreloaded } = require("../utils/preload");
+const { getSimilarTracks } = require("../utils/lastfm");
 const { updatePlayerUI, disablePlayerUI } = require("../utils/playerUI");
+const { cleanupPreload, isTrackPreloaded, preloadCurrentTrack, preloadNextTrack, preloadPreviousTrack, preloadAutoplaySuggestion } = require("../utils/preload");
+const { fetchAutoplaySuggestion, getMoodPlaylist, getVibeShiftGenre } = require("../recommendation-engine");
 
 const queueMap = new Map();
 const queueHistory = new Map(); // Store last 10 songs per guild
@@ -38,9 +40,11 @@ function enqueueTrack(guildId, track, client, textChannel) {
 				preloadCurrentProcess: null,
 				preloadNextProcess: null,
 				preloadPrevProcess: null,
+				preloadAutoplayProcess: null,
 				preloadedCurrent: null,
 				preloadedNext: null,
 				preloadedPrev: null,
+				preloadedAutoplay: null,
 				currentTrack: null,
 				playbackStartTime: null,
 				playbackOffset: 0,
@@ -51,13 +55,38 @@ function enqueueTrack(guildId, track, client, textChannel) {
 				isSeeking: false,
 				voiceStateHandler: null,
 				volume: 100,
+				autoplay: false,
+				autoplaySuggestion: null,
+				autoplayHistory: new Set(),
+				moodActive: false,
+				moodGenre: null,
+				moodStrict: false,
+				moodSongsPlayed: 0,
+				vibeShiftCount: 0,
+				drift: false,
 			};
 			queueMap.set(guildId, queue);
 		} else {
 			queue.textChannel = textChannel || queue.textChannel;
 		}
 
-		queue.tracks.push(track);
+		// User track: remove all pending autoplay songs, insert user track at end of user songs
+		if (!track.isAutoPlaySong && queue.playing) {
+			// Strip all autoplay songs from queue (keep tracks[0] = currently playing)
+			queue.tracks = queue.tracks.filter((t, i) => i === 0 || !t.isAutoPlaySong);
+			// Clear stale autoplay suggestion/preload
+			queue.autoplaySuggestion = null;
+			if (queue.preloadAutoplayProcess) { queue.preloadAutoplayProcess.kill(); queue.preloadAutoplayProcess = null; }
+			queue.preloadedAutoplay = null;
+			queue.vibeShiftCount = 0;
+			// User took manual control — reset mood state
+			queue.moodActive = false;
+			queue.moodGenre = null;
+			queue.moodSongsPlayed = 0;
+			queue.tracks.push(track);
+		} else {
+			queue.tracks.push(track);
+		}
 		if (queue.aloneTimer) { clearTimeout(queue.aloneTimer); queue.aloneTimer = null; }
 
 		if (!queue.playing) {
@@ -97,9 +126,8 @@ async function startPlaying(guildId, client) {
 
 	// Store current track and duration if available
 	queue.currentTrack = track;
-	if (track.duration) {
-		queue.duration = track.duration;
-	}
+	queue.duration = track.duration || 0;
+	queue.playbackOffset = 0;
 	
 	// Add to history (avoid duplicates of same URL)
 	if (!queueHistory.has(guildId)) {
@@ -247,6 +275,26 @@ async function startPlaying(guildId, client) {
 			}
 			
 			queue.intentionalStop = false;
+
+			// Kill direct stream ffmpeg process if any
+			if (queue.directStreamProcess) {
+				queue.directStreamProcess.kill();
+				queue.directStreamProcess = null;
+			}
+
+			// Livestream ended (skipped or dropped) — no autoplay/drift, but continue queue normally
+			if (queue.currentTrack?.livestream) {
+				queue.tracks.shift();
+				cleanupPreload(queue);
+				if (queue.tracks.length > 0) {
+					startPlaying(guildId, client);
+				} else {
+					queue.playing = false;
+					const { createSuccessEmbed } = require("../utils/embeds");
+					queue.textChannel?.send({ embeds: [createSuccessEmbed("All songs played.")] }).catch(() => {});
+				}
+				return;
+			}
 			
 			if (queue.isReplaying) {
 				queue.isReplaying = false;
@@ -267,8 +315,95 @@ async function startPlaying(guildId, client) {
 			}
 			
 			queue.tracks.shift();
+
+			// Mood drift: non-strict, after 4-5 songs mid-playlist
+			if (queue.moodActive && !queue.moodStrict) {
+				queue.moodSongsPlayed++;
+				const driftAfter = 4 + Math.round(Math.random()); // 4 or 5
+				if (queue.moodSongsPlayed >= driftAfter) {
+					const newMood = getVibeShiftGenre(queue.moodGenre);
+					queue.moodGenre = newMood;
+					queue.moodSongsPlayed = 0;
+					const { createInfoEmbed } = require("../utils/embeds");
+					queue.textChannel?.send({ embeds: [createInfoEmbed(`🎵 Mood shift → **${newMood}**`)] }).catch(() => {});
+					// Clear remaining mood tracks, enqueue new mood
+					queue.tracks = [];
+					const playlist = getMoodPlaylist(newMood);
+					for (const t of playlist) {
+						queue.tracks.push({ title: t.label, url: t.url, requester: queue.currentTrack?.requester, isAutoPlaySong: true });
+					}
+					startPlaying(guildId, client);
+					return;
+				}
+			}
+
+			// Vibe shift in autoplay: every 4 songs
+			if (queue.autoplay && queue.drift && !queue.moodActive) {
+				queue.vibeShiftCount = (queue.vibeShiftCount || 0) + 1;
+				if (queue.vibeShiftCount >= 4) {
+					queue.vibeShiftCount = 0;
+					const newGenre = getVibeShiftGenre(queue.moodGenre || "happy");
+					queue.moodGenre = newGenre;
+					const { createInfoEmbed } = require("../utils/embeds");
+					queue.textChannel?.send({ embeds: [createInfoEmbed(`🎵 Vibe shift → **${newGenre}**`)] }).catch(() => {});
+					// Inject a few tracks from the new genre then let autoplay continue
+					const playlist = getMoodPlaylist(newGenre);
+					const inject = playlist.slice(0, 2);
+					for (const t of inject.reverse()) {
+						queue.tracks.unshift({ title: t.label, url: t.url, requester: queue.currentTrack?.requester, isAutoPlaySong: true });
+					}
+				}
+			}
+
 			if (queue.tracks.length > 0) {
 				startPlaying(guildId, client);
+			} else if (queue.autoplay && queue.currentTrack) {
+				const lastTrack = queue.currentTrack;
+				// Don't cleanupPreload here — preloadedAutoplay file needs to survive for startPlaying
+				// Only clean up current/next/prev slots, keep autoplay preload intact
+				if (queue.preloadCurrentProcess) { queue.preloadCurrentProcess.kill(); queue.preloadCurrentProcess = null; }
+				if (queue.preloadedCurrent) { fs.unlink(queue.preloadedCurrent.filePath, () => {}); queue.preloadedCurrent = null; }
+				if (queue.preloadNextProcess) { queue.preloadNextProcess.kill(); queue.preloadNextProcess = null; }
+				if (queue.preloadedNext) { fs.unlink(queue.preloadedNext.filePath, () => {}); queue.preloadedNext = null; }
+				if (queue.preloadPrevProcess) { queue.preloadPrevProcess.kill(); queue.preloadPrevProcess = null; }
+				if (queue.preloadedPrev) { fs.unlink(queue.preloadedPrev.filePath, () => {}); queue.preloadedPrev = null; }
+				queue.playing = false;
+
+				const enqueueSuggestion = (suggestion) => {
+					if (!suggestion) {
+						queue.textChannel?.send("🎵 Autoplay: couldn't find a suggestion.").catch(() => {});
+						return;
+					}
+					const { createInfoEmbed } = require("../utils/embeds");
+					queue.autoplayHistory.add(suggestion.url);
+					if (queue.autoplayHistory.size > 50) {
+						const first = queue.autoplayHistory.values().next().value;
+						queue.autoplayHistory.delete(first);
+					}
+					enqueueTrack(guildId, { ...suggestion, requester: lastTrack.requester, isAutoPlaySong: true }, client, queue.textChannel);
+				};
+
+				if (queue.autoplaySuggestion) {
+					// Already fetched while song was playing — instant
+					enqueueSuggestion(queue.autoplaySuggestion);
+					queue.autoplaySuggestion = null;
+				} else {
+					// Still fetching — wait up to 5s
+					console.log(`[${new Date().toLocaleTimeString()}] Autoplay: waiting for suggestion...`);
+					let waited = 0;
+					const poll = setInterval(() => {
+						waited += 500;
+						if (queue.autoplaySuggestion) {
+							clearInterval(poll);
+							const s = queue.autoplaySuggestion;
+							queue.autoplaySuggestion = null;
+							enqueueSuggestion(s);
+						} else if (waited >= 5000) {
+							clearInterval(poll);
+							enqueueSuggestion(null);
+						}
+					}, 500);
+				}
 			} else {
 				console.log(`[${new Date().toLocaleTimeString()}] Queue finished`);
 				cleanupPreload(queue);
@@ -333,11 +468,14 @@ async function startPlaying(guildId, client) {
 	
 	// Check if this track is preloaded
 	const preloaded = isTrackPreloaded(queue, track.url);
+	console.log(`[Preload] Check for "${track.title}" → ${preloaded ? preloaded.direction : 'MISS'} | preloadedAutoplay=${queue.preloadedAutoplay?.url?.slice(-11)}`);
 	if (preloaded) {
 		console.log(`[${new Date().toLocaleTimeString()}] Using preloaded: ${track.title}`);
 		stream = fs.createReadStream(preloaded.data.filePath);
 		queue.currentStream = stream;
-		
+
+		if (preloaded.data.duration) queue.duration = preloaded.data.duration;
+
 		const resource = createAudioResource(stream, { inlineVolume: true });
 		resource.volume.setVolume((queue.volume || 100) / 100);
 		queue.player.play(resource);
@@ -347,59 +485,125 @@ async function startPlaying(guildId, client) {
 		// Update player UI
 		updatePlayerUI(queue, track, queue.textChannel).catch(console.error);
 		
-		// Clean up used preloaded file
-		const fileToDelete = preloaded.data.filePath;
+		// Clean up used preloaded slot reference
 		if (preloaded.direction === 'next') {
 			queue.preloadedNext = null;
 		} else if (preloaded.direction === 'prev') {
 			queue.preloadedPrev = null;
+		} else if (preloaded.direction === 'autoplay') {
+			// Don't null preloadedAutoplay yet — file is still streaming.
+			// preloadAutoplaySuggestion will overwrite the slot when next suggestion is ready.
+		} else if (preloaded.direction === 'eager') {
+			const { eagerPreloads } = require('../utils/preload');
+			eagerPreloads.delete(guildId);
 		} else {
 			queue.preloadedCurrent = null;
 		}
-		
-		// Delete file after a short delay to ensure stream has started
-		setTimeout(() => {
-			try {
-				if (fs.existsSync(fileToDelete)) fs.unlinkSync(fileToDelete);
-			} catch (e) {
-				console.error("Error cleaning preload file:", e.message);
-			}
-		}, 2000);
+
+		// Delete file after a short delay — but NOT for autoplay/eager slots
+		// (those files get overwritten by the next preload naturally)
+		if (preloaded.direction !== 'autoplay' && preloaded.direction !== 'eager') {
+			const fileToDelete = preloaded.data.filePath;
+			setTimeout(() => {
+				try {
+					if (fs.existsSync(fileToDelete)) fs.unlinkSync(fileToDelete);
+				} catch (e) {
+					console.error("Error cleaning preload file:", e.message);
+				}
+			}, 2000);
+		}
 		
 		if (queue.tracks.length > 1) preloadNextTrack(guildId, queue.tracks[1], queue);
 		const history = queueHistory.get(guildId);
 		if (history && history.length >= 2) preloadPreviousTrack(guildId, history[history.length - 2], queue);
+
+		// Kick off autoplay suggestion fetch in background
+		if (queue.autoplay && !queue.tracks.slice(1).some(t => !t.isAutoPlaySong)) {
+			queue.autoplaySuggestion = null;
+			const excludeUrls = new Set([
+				...Array.from(queue.autoplayHistory),
+				...(queueHistory.get(guildId) || []).map(t => t.url),
+			]);
+			console.log(`[Autoplay] Starting background fetch for: "${track.title}"`);
+			fetchAutoplaySuggestion(track, excludeUrls).then(suggestion => {
+				console.log(`[Autoplay] Fetch complete → ${suggestion ? `"${suggestion.title}"` : 'null'}`);
+				if (suggestion) {
+					queue.autoplaySuggestion = suggestion;
+					preloadAutoplaySuggestion(guildId, suggestion, queue);
+					console.log(`[Autoplay] Preloading suggestion: "${suggestion.title}"`);
+					if (queue.currentTrack) updatePlayerUI(queue, queue.currentTrack, queue.textChannel).catch(() => {});
+				}
+			}).catch(e => console.log(`[Autoplay] Fetch threw: ${e.message}`));
+		}
 		
 		return;
 	}
 	
 	// Stream directly if not preloaded
+	const isLivestream = !!track.livestream;
+	const isDirectStream = !!track.directStream;
 	try {
+		if (isDirectStream) {
+			const https = require('https');
+			const http = require('http');
+
+			function fetchStream(url, redirects = 0) {
+				if (redirects > 5) {
+					queue.textChannel?.send('⚠ Stream redirect loop.').catch(() => {});
+					queue.playing = false;
+					return;
+				}
+				const lib = url.startsWith('https') ? https : http;
+				lib.get(url, (res) => {
+					if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+						res.resume();
+						return fetchStream(res.headers.location, redirects + 1);
+					}
+					const ffmpeg = spawn('ffmpeg', ['-i', 'pipe:0', '-f', 's16le', '-ar', '48000', '-ac', '2', 'pipe:1']);
+					res.pipe(ffmpeg.stdin);
+					stream = ffmpeg.stdout;
+					queue.currentStream = stream;
+					queue.directStreamProcess = ffmpeg;
+					queue.playbackOffset = 0;
+
+					const { StreamType } = require('@discordjs/voice');
+					const resource = createAudioResource(stream, { inputType: StreamType.Raw, inlineVolume: true });
+					resource.volume.setVolume((queue.volume || 100) / 100);
+					queue.player.play(resource);
+					queue.playbackStartTime = Date.now();
+					updatePlayerUI(queue, track, queue.textChannel).catch(console.error);
+
+					ffmpeg.on('error', err => console.error(`[DirectStream] ffmpeg: ${err.message}`));
+					res.on('error', err => { console.error(`[DirectStream] res: ${err.message}`); queue.playing = false; });
+				}).on('error', (err) => {
+					console.error(`[DirectStream] connect: ${err.message}`);
+					queue.textChannel?.send(`⚠ Couldn't connect to stream: ${err.message}`).catch(() => {});
+					queue.tracks.shift();
+					queue.playing = false;
+				});
+			}
+
+			fetchStream(track.url);
+			return;
+		}
+
 		ytdlpProcess = spawn('yt-dlp', [
 			'-f', 'bestaudio',
 			'-o', '-',
-			'--no-playlist',
 			'--quiet',
+			...(isLivestream ? [] : ['--no-playlist']),
 			track.url
 		]);
 		stream = ytdlpProcess.stdout;
 		queue.currentStream = stream;
 		queue.playbackOffset = 0;
-		
-		// Start preloading current track immediately (in parallel with streaming)
-		preloadCurrentTrack(guildId, track, queue);
-		
-		// Fetch audio info in background for seeking support (non-blocking)
-		getDirectAudioUrl(track.url).then(audioInfo => {
-			if (audioInfo && queue.currentStream === stream) {
-				if (audioInfo.url) {
-					queue.audioUrl = audioInfo.url;
-				}
-				if (audioInfo.duration) {
-					queue.duration = audioInfo.duration;
-				}
-			}
-		}).catch(() => {});
+
+		ytdlpProcess.stderr.on('data', d => console.error(`[yt-dlp stderr] ${d.toString().trim()}`));
+		ytdlpProcess.on('close', code => console.log(`[yt-dlp] exited with code ${code} for: ${track.title}`));
+
+		if (!isLivestream) {
+			preloadCurrentTrack(guildId, track, queue);
+		}
 		
 		let streamStarted = false;
 		stream.once('readable', () => {
@@ -409,10 +613,36 @@ async function startPlaying(guildId, client) {
 			resource.volume.setVolume((queue.volume || 100) / 100);
 			queue.player.play(resource);
 			queue.playbackStartTime = Date.now();
+
+			if (isLivestream) {
+				// Show player UI with snake bar — updatePlayerUI + interval handles the animation
+				updatePlayerUI(queue, track, queue.textChannel).catch(console.error);
+				return;
+			}
+
 			updatePlayerUI(queue, track, queue.textChannel).catch(console.error);
 			if (queue.tracks.length > 1) preloadNextTrack(guildId, queue.tracks[1], queue);
 			const history = queueHistory.get(guildId);
 			if (history && history.length >= 2) preloadPreviousTrack(guildId, history[history.length - 2], queue);
+
+			// Kick off autoplay suggestion fetch in background
+			if (queue.autoplay && !queue.tracks.slice(1).some(t => !t.isAutoPlaySong)) {
+				queue.autoplaySuggestion = null;
+				const excludeUrls = new Set([
+					...Array.from(queue.autoplayHistory),
+					...(queueHistory.get(guildId) || []).map(t => t.url),
+				]);
+				console.log(`[Autoplay] Starting background fetch for: "${track.title}"`);
+				fetchAutoplaySuggestion(track, excludeUrls).then(suggestion => {
+					console.log(`[Autoplay] Fetch complete → ${suggestion ? `"${suggestion.title}"` : 'null'}`);
+					if (suggestion) {
+						queue.autoplaySuggestion = suggestion;
+						preloadAutoplaySuggestion(guildId, suggestion, queue);
+						console.log(`[Autoplay] Preloading suggestion: "${suggestion.title}"`);
+						if (queue.currentTrack) updatePlayerUI(queue, queue.currentTrack, queue.textChannel).catch(() => {});
+					}
+				}).catch(e => console.log(`[Autoplay] Fetch threw: ${e.message}`));
+			}
 		});
 		
 		stream.once("error", (error) => {
@@ -777,6 +1007,13 @@ function stopPlayback(guildId) {
 	queue.playing = false;
 	queue.intentionalStop = true;
 	queue.cleanupInProgress = true;
+	queue.autoplay = false;
+	queue.autoplaySuggestion = null;
+	if (queue.directStreamProcess) { queue.directStreamProcess.kill(); queue.directStreamProcess = null; }
+	queue.moodActive = false;
+	queue.moodGenre = null;
+	queue.moodSongsPlayed = 0;
+	queue.vibeShiftCount = 0;
 	
 	cleanupPreload(queue);
 	
@@ -796,6 +1033,25 @@ function stopPlayback(guildId) {
 	return true;
 }
 
+function triggerAutoplayFetch(guildId) {
+	const queue = queueMap.get(guildId);
+	if (!queue?.currentTrack || queue.autoplaySuggestion) return;
+	const excludeUrls = new Set([
+		...Array.from(queue.autoplayHistory),
+		...(queueHistory.get(guildId) || []).map(t => t.url),
+	]);
+	console.log(`[Autoplay] Starting background fetch for: "${queue.currentTrack.title}"`);
+	fetchAutoplaySuggestion(queue.currentTrack, excludeUrls).then(suggestion => {
+		console.log(`[Autoplay] Fetch complete → ${suggestion ? `"${suggestion.title}"` : 'null'}`);
+		if (suggestion) {
+			queue.autoplaySuggestion = suggestion;
+			preloadAutoplaySuggestion(guildId, suggestion, queue);
+			console.log(`[Autoplay] Preloading suggestion: "${suggestion.title}"`);
+			if (queue.currentTrack) updatePlayerUI(queue, queue.currentTrack, queue.textChannel).catch(() => {});
+		}
+	}).catch(e => console.log(`[Autoplay] Fetch threw: ${e.message}`));
+}
+
 module.exports = {
 	enqueueTrack,
 	queueMap,
@@ -804,4 +1060,5 @@ module.exports = {
 	replayCurrentSong,
 	replayLastQueue,
 	shuffleQueue,
+	triggerAutoplayFetch,
 };

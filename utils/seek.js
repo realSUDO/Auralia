@@ -1,40 +1,24 @@
 const { spawn } = require("child_process");
-const youtubedl = require("youtube-dl-exec");
 
 /**
  * Get direct audio URL from yt-dlp
  */
 async function getDirectAudioUrl(videoUrl) {
-	try {
-		const info = await youtubedl(videoUrl, {
-			dumpSingleJson: true,
-			noCheckCertificates: true,
-			noWarnings: true,
-			preferFreeFormats: true,
-			addHeader: ['referer:youtube.com', 'user-agent:googlebot']
+	return new Promise((resolve) => {
+		const proc = spawn('yt-dlp', [
+			'--print', '%(url)s|||%(duration)s',
+			'-f', 'bestaudio',
+			'--no-playlist', '--quiet', videoUrl
+		]);
+		let out = '';
+		proc.stdout.on('data', d => (out += d));
+		proc.on('close', () => {
+			const [url, dur] = out.trim().split('|||');
+			if (!url) return resolve(null);
+			resolve({ url: url.trim(), duration: parseFloat(dur) || 0 });
 		});
-		
-		// Check if formats exist
-		if (!info.formats || !Array.isArray(info.formats) || info.formats.length === 0) {
-			console.error("No formats found in video info");
-			return {
-				url: null,
-				duration: info.duration || 0,
-				title: info.title || 'Unknown'
-			};
-		}
-		
-		// Get best audio format
-		const audioFormat = info.formats.find(f => f.acodec !== 'none' && f.vcodec === 'none') || info.formats[0];
-		return {
-			url: audioFormat?.url || null,
-			duration: info.duration || 0,
-			title: info.title || 'Unknown'
-		};
-	} catch (error) {
-		console.error("Error getting direct audio URL:", error.message);
-		return null;
-	}
+		proc.on('error', () => resolve(null));
+	});
 }
 
 /**

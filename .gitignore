@@ -2,10 +2,7 @@
 node_modules/
 config.json
 .env
-node_modules/
-config.json
-.env
-node_modules/
-config.json
-.env
+cookies.txt
 *-player-script.js
+*.md
+!README.md

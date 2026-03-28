@@ -3,20 +3,41 @@ const { createInfoEmbed, createErrorEmbed } = require("../utils/embeds");
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
 
 function buildQueueEmbed(queue, page, guildId) {
+  const current = queue.currentTrack;
+
+  // User songs = upcoming tracks that are NOT autoplay
+  const userTracks = queue.tracks.slice(1).filter(t => !t.isAutoPlaySong);
+  const autoTracks = queue.tracks.slice(1).filter(t => t.isAutoPlaySong);
+
+  // Build display: user tracks first, then autoplay tracks, then pending suggestion if nothing else
+  let displayTracks = [...userTracks];
+  if (autoTracks.length > 0) {
+    displayTracks = [...displayTracks, ...autoTracks];
+  } else if (userTracks.length === 0 && queue.autoplaySuggestion) {
+    displayTracks = [{ ...queue.autoplaySuggestion, isAutoPlaySong: true }];
+  }
+
   const perPage = 10;
-  const totalPages = Math.ceil(queue.tracks.length / perPage);
+  const totalPages = Math.max(1, Math.ceil(displayTracks.length / perPage));
   page = Math.max(1, Math.min(page, totalPages));
   const start = (page - 1) * perPage;
+  const slice = displayTracks.slice(start, start + perPage);
 
-  const current = queue.tracks[0];
-  const upcoming = queue.tracks.slice(start + 1, start + perPage + 1);
+  let msg = page === 1 ? `🎵 **Now Playing:**\n${current?.title || 'Nothing'}\n\n` : '';
 
-  let msg = page === 1 ? `🎵 **Now Playing:**\n${current.title}\n\n` : '';
-  if (upcoming.length > 0) {
+  if (slice.length > 0) {
     msg += `**Up Next (Page ${page}/${totalPages}):**\n`;
-    upcoming.forEach((t, i) => { msg += `${start + i + 1}. ${t.title}\n`; });
+    slice.forEach((t, i) => {
+      msg += `${start + i + 1}. ${t.title}${t.isAutoPlaySong ? ' *(autoplay)*' : ''}\n`;
+    });
   } else if (page === 1) {
-    msg += `No upcoming songs.`;
+    if (queue.autoplay && queue.preloadAutoplayProcess) {
+      msg += '*⏳ Fetching next autoplay suggestion...*';
+    } else if (queue.autoplay) {
+      msg += '*Queue empty — autoplay will suggest next.*';
+    } else {
+      msg += 'No upcoming songs.';
+    }
   }
 
   const components = [];
@@ -32,16 +53,17 @@ function buildQueueEmbed(queue, page, guildId) {
 
 module.exports = {
   name: "queue",
+  buildQueueEmbed,
   description: "Shows the current queue",
   async execute(message, args) {
     const queue = queueMap.get(message.guild.id);
-    if (!queue || queue.tracks.length === 0) return message.reply({ embeds: [createErrorEmbed("The queue is empty!")] });
+    if (!queue?.currentTrack) return message.reply({ embeds: [createErrorEmbed("Nothing is playing!")] });
     message.channel.send(buildQueueEmbed(queue, parseInt(args[0]) || 1, message.guild.id));
   },
   async slashExecute(interaction) {
     await interaction.deferReply({ ephemeral: true });
     const queue = queueMap.get(interaction.guildId);
-    if (!queue || queue.tracks.length === 0) return interaction.editReply({ embeds: [createErrorEmbed("The queue is empty!")] });
+    if (!queue?.currentTrack) return interaction.editReply({ embeds: [createErrorEmbed("Nothing is playing!")] });
     interaction.editReply(buildQueueEmbed(queue, interaction.options.getInteger("page") || 1, interaction.guildId));
   },
 };
