@@ -1,0 +1,8 @@
+{
+  "token": "your_discord_bot_token",
+  "prefix": "!",
+  "clientId": "your_discord_client_id",
+  "lastfmApiKey": "your_lastfm_api_key",
+  "spotifyClientId": "your_spotify_client_id",
+  "spotifyClientSecret": "your_spotify_client_secret"
+}
