@@ -599,8 +599,17 @@ async function startPlaying(guildId, client) {
 		queue.currentStream = stream;
 		queue.playbackOffset = 0;
 
-		ytdlpProcess.stderr.on('data', d => console.error(`[yt-dlp stderr] ${d.toString().trim()}`));
-		ytdlpProcess.on('close', code => console.log(`[yt-dlp] exited with code ${code} for: ${track.title}`));
+		ytdlpProcess.stderr.on('data', d => {
+			const msg = d.toString().trim();
+			// Broken pipe is expected when the track ends/is skipped while yt-dlp is still writing
+			if (msg.includes('Broken pipe') || msg.includes('BrokenPipeError') || msg.includes('Exception ignored')) return;
+			console.error(`[yt-dlp stderr] ${msg}`);
+		});
+		ytdlpProcess.on('close', (code, signal) => {
+			// SIGTERM (signal kill) and broken pipe exits are expected on skip/stop
+			if (signal || code === 0) return;
+			console.log(`[yt-dlp] exited with code ${code} for: ${track.title}`);
+		});
 
 		if (!isLivestream) {
 			preloadCurrentTrack(guildId, track, queue);
