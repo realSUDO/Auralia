@@ -9,12 +9,12 @@ module.exports = {
 		// Handle slash commands
 		if (interaction.isChatInputCommand()) {
 			const command = client.commands.get(interaction.commandName);
-			if (!command?.slashExecute) return interaction.reply({ embeds: [createErrorEmbed("Command not found.")], ephemeral: true });
+			if (!command?.slashExecute) return interaction.reply({ embeds: [createErrorEmbed("Command not found.")], flags: 64 });
 			try {
 				await command.slashExecute(interaction, client);
 			} catch (err) {
 				console.error(err);
-				const msg = { embeds: [createErrorEmbed("Something went wrong.")], ephemeral: true };
+				const msg = { embeds: [createErrorEmbed("Something went wrong.")], flags: 64 };
 				interaction.replied || interaction.deferred ? interaction.editReply(msg).catch(() => {}) : interaction.reply(msg).catch(() => {});
 			}
 			return;
@@ -38,7 +38,7 @@ module.exports = {
 			const parts = customId.split('_'); // moodpick_<mood>_<guildId>
 			const moodType = parts[1];
 			const { handleMoodFromButton } = require('../commands/mood');
-			await interaction.deferReply({ ephemeral: true });
+			await interaction.deferReply({ flags: 64 });
 			handleMoodFromButton(moodType, interaction.user, interaction.guild, interaction.channel, client,
 				msg => interaction.editReply(msg).catch(() => {}));
 			return;
@@ -191,7 +191,7 @@ module.exports = {
 		case "moodmenu": {
 			const { createMoodSelectionRows } = require('../utils/playerUI');
 			const rows = createMoodSelectionRows(interaction.guildId);
-			await interaction.reply({ content: '🎭 Pick a mood:', components: rows, ephemeral: true }).catch(() => {});
+			await interaction.reply({ content: '🎭 Pick a mood:', components: rows, flags: 64 }).catch(() => {});
 			break;
 		}
 

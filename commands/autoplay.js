@@ -47,7 +47,7 @@ module.exports = {
     handleAutoplay(message.guild.id, args, msg => message.channel.send(msg).catch(() => {}));
   },
   async slashExecute(interaction) {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: 64 });
     const off = interaction.options.getString("action") === "off";
     handleAutoplay(interaction.guildId, off ? ["off"] : [], msg => interaction.editReply(msg).catch(() => {}));
   },

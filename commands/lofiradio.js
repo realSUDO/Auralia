@@ -25,6 +25,7 @@ module.exports = {
       msg => message.channel.send(msg).catch(() => {}));
   },
   async slashExecute(interaction, client) {
+    if (!interaction.guild) return interaction.reply({ content: "This command can only be used in a server.", flags: 64 });
     await interaction.deferReply();
     handleLofiRadio(interaction.user, interaction.guild, interaction.channel, client,
       msg => interaction.editReply(msg).catch(() => {}));

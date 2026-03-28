@@ -87,6 +87,7 @@ module.exports = {
     process.nextTick(() => handlePlay(args.join(" "), message.author, message.guild, message.channel, client));
   },
   async slashExecute(interaction, client) {
+    if (!interaction.guild) return interaction.reply({ content: "This command can only be used in a server.", flags: 64 });
     await interaction.deferReply();
     await handlePlay(interaction.options.getString("query"), interaction.user, interaction.guild, interaction.channel, client, interaction);
   },

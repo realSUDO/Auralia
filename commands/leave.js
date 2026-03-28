@@ -25,7 +25,7 @@ module.exports = {
     handleLeave(message.guild.id, client, (msg) => message.channel.send(msg).catch(() => {}));
   },
   async slashExecute(interaction, client) {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: 64 });
     handleLeave(interaction.guildId, client, (msg) => interaction.editReply(msg).catch(() => {}));
   },
 };

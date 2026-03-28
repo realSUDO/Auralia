@@ -19,7 +19,7 @@ module.exports = {
     handleSkip(message.guild.id, (msg) => message.channel.send(msg).catch(() => {}));
   },
   async slashExecute(interaction) {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: 64 });
     handleSkip(interaction.guildId, (msg) => interaction.editReply(msg).catch(() => {}));
   },
 };

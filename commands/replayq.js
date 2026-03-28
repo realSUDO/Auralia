@@ -16,7 +16,7 @@ module.exports = {
     handleReplayQ(message.guild.id, message.author, message.guild, message.channel, client, (msg) => message.channel.send(msg).catch(() => {}));
   },
   async slashExecute(interaction, client) {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: 64 });
     handleReplayQ(interaction.guildId, interaction.user, interaction.guild, interaction.channel, client, (msg) => interaction.editReply(msg).catch(() => {}));
   },
 };

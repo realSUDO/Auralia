@@ -61,7 +61,7 @@ module.exports = {
     message.channel.send(buildQueueEmbed(queue, parseInt(args[0]) || 1, message.guild.id));
   },
   async slashExecute(interaction) {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: 64 });
     const queue = queueMap.get(interaction.guildId);
     if (!queue?.currentTrack) return interaction.editReply({ embeds: [createErrorEmbed("Nothing is playing!")] });
     interaction.editReply(buildQueueEmbed(queue, interaction.options.getInteger("page") || 1, interaction.guildId));

@@ -22,7 +22,8 @@ module.exports = {
     handleJoin(message.author, message.guild, (msg) => message.channel.send(msg).catch(() => {}));
   },
   async slashExecute(interaction) {
-    await interaction.deferReply({ ephemeral: true });
+    if (!interaction.guild) return interaction.reply({ content: "This command can only be used in a server.", flags: 64 });
+    await interaction.deferReply({ flags: 64 });
     handleJoin(interaction.user, interaction.guild, (msg) => interaction.editReply(msg).catch(() => {}));
   },
 };

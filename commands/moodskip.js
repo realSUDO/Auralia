@@ -31,7 +31,7 @@ module.exports = {
     handleMoodSkip(message.guild.id, msg => message.channel.send(msg).catch(() => {}), client);
   },
   async slashExecute(interaction, client) {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: 64 });
     handleMoodSkip(interaction.guildId, msg => interaction.editReply(msg).catch(() => {}), client);
   },
 };

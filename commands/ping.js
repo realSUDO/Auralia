@@ -7,6 +7,6 @@ module.exports = {
     message.channel.send({ embeds: [createSuccessEmbed("Pong! 🏓")] });
   },
   async slashExecute(interaction) {
-    await interaction.reply({ embeds: [createSuccessEmbed("Pong! 🏓")], ephemeral: true });
+    await interaction.reply({ embeds: [createSuccessEmbed("Pong! 🏓")], flags: 64 });
   },
 };

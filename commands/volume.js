@@ -23,7 +23,7 @@ module.exports = {
     handleVolume(message.guild.id, isNaN(level) ? null : level, (msg) => message.channel.send(msg).catch(() => {}));
   },
   async slashExecute(interaction) {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: 64 });
     const level = interaction.options.getInteger("level");
     handleVolume(interaction.guildId, level ?? null, (msg) => interaction.editReply(msg).catch(() => {}));
   },

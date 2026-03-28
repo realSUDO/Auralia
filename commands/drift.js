@@ -21,7 +21,7 @@ module.exports = {
     handleDrift(message.guild.id, args[0]?.toLowerCase(), msg => message.channel.send(msg).catch(() => {}));
   },
   async slashExecute(interaction) {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: 64 });
     const val = interaction.options.getString("enabled");
     handleDrift(interaction.guildId, val, msg => interaction.editReply(msg).catch(() => {}));
   },

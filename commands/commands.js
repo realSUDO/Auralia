@@ -91,7 +91,7 @@ module.exports = {
     message.channel.send(buildPage(1)).catch(() => {});
   },
   async slashExecute(interaction) {
-    await interaction.reply({ ...buildPage(1), ephemeral: true });
+    await interaction.reply({ ...buildPage(1), flags: 64 });
   },
   buildPage, // exported for interactionCreate handler
 };
