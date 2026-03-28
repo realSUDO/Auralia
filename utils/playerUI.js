@@ -39,7 +39,7 @@ function createLivestreamBar(tick, length = 15) {
  */
 function createNowPlayingEmbed(track, queue) {
 	const embed = new EmbedBuilder()
-		.setTitle(track.isAutoPlaySong ? "🎵 Now Playing (autoplay)" : "🎵 Now Playing")
+		.setTitle(track.isAutoPlaySong ? "<:music:1487409848126668971> Now Playing (autoplay)" : "<:music:1487409848126668971> Now Playing")
 		.setDescription(`**${track.title}**`)
 		.setColor(queue.isPaused ? 0xff9900 : 0x00ffcc);
 
