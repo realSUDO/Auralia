@@ -10,7 +10,8 @@ if (process.env.DISCORD_TOKEN) {
     token: process.env.DISCORD_TOKEN,
     prefix: process.env.PREFIX || '!',
     spotifyClientId: process.env.SPOTIFY_CLIENT_ID,
-    spotifyClientSecret: process.env.SPOTIFY_CLIENT_SECRET
+    spotifyClientSecret: process.env.SPOTIFY_CLIENT_SECRET,
+    lastfmApiKey: process.env.LASTFM_API_KEY
   };
 } else {
   // Development: Use config.json

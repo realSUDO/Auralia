@@ -1,6 +1,6 @@
 const https = require("https");
 
-const LASTFM_API_KEY = process.env.LASTFM_API_KEY;
+const LASTFM_API_KEY = require("../config.json").lastfmApiKey;
 
 /**
  * Parse a messy YouTube title into { artist, track }

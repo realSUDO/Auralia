@@ -176,6 +176,9 @@ module.exports = {
 			const { triggerAutoplayFetch } = require('../player/musicPlayer');
 			queue.autoplay = !queue.autoplay;
 			queue.autoplaySuggestion = null;
+			if (!queue.autoplay) {
+				queue.tracks = queue.tracks.filter((t, i) => i === 0 || !t.isAutoPlaySong);
+			}
 			if (queue.autoplay) {
 				const hasUserSongsAhead = queue.tracks.slice(1).some(t => !t.isAutoPlaySong);
 				if (!hasUserSongsAhead && queue.currentTrack) triggerAutoplayFetch(interaction.guildId);

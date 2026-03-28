@@ -58,7 +58,7 @@ async function handlePlay(query, user, guild, channel, client, interaction) {
       send({ embeds: [createInfoEmbed(`Found ${spotifyTracks.length} track(s). Searching YouTube...`)] });
       for (const t of spotifyTracks) {
         const result = await searchYouTube(t.searchQuery).catch(() => null);
-        if (result) enqueueTrack(guild.id, { title: result.title, url: result.url, requester: user, artist: t.artist, trackName: t.trackName }, client, channel);
+        if (result) enqueueTrack(guild.id, { title: result.title, url: result.url, requester: user, duration: result.seconds || 0, artist: t.artist, trackName: t.trackName }, client, channel);
       }
       send({ embeds: [createSuccessEmbed(`Added ${spotifyTracks.length} track(s) from Spotify.`)] });
 
