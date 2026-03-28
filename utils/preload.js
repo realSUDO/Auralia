@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
+const { ytdlpArgs } = require("./ytdlp");
 
 const CACHE_DIR = path.join(__dirname, "../.cache");
 
@@ -52,13 +53,13 @@ function preloadCurrentTrack(guildId, currentTrack, queue) {
 	const filePath = path.join(CACHE_DIR, `${guildId}_current.webm`);
 	const tmpPath = filePath + '.tmp';
 
-	const ytdlp = spawn('yt-dlp', [
+	const ytdlp = spawn('yt-dlp', ytdlpArgs([
 		'-f', 'bestaudio',
 		'-o', tmpPath,
 		'--no-playlist',
 		'--quiet',
 		currentTrack.url
-	]);
+	]));
 
 	queue.preloadCurrentProcess = ytdlp;
 
@@ -119,13 +120,13 @@ function preloadNextTrack(guildId, nextTrack, queue) {
 	const filePath = path.join(CACHE_DIR, `${guildId}_next.webm`);
 	const tmpPath = filePath + '.tmp';
 
-	const ytdlp = spawn('yt-dlp', [
+	const ytdlp = spawn('yt-dlp', ytdlpArgs([
 		'-f', 'bestaudio',
 		'-o', tmpPath,
 		'--no-playlist',
 		'--quiet',
 		nextTrack.url
-	]);
+	]));
 
 	queue.preloadNextProcess = ytdlp;
 
@@ -180,13 +181,13 @@ function preloadPreviousTrack(guildId, previousTrack, queue) {
 	const filePath = path.join(CACHE_DIR, `${guildId}_prev.webm`);
 	const tmpPath = filePath + '.tmp';
 
-	const ytdlp = spawn('yt-dlp', [
+	const ytdlp = spawn('yt-dlp', ytdlpArgs([
 		'-f', 'bestaudio',
 		'-o', tmpPath,
 		'--no-playlist',
 		'--quiet',
 		previousTrack.url
-	]);
+	]));
 
 	queue.preloadPrevProcess = ytdlp;
 
@@ -212,7 +213,7 @@ function preloadPreviousTrack(guildId, previousTrack, queue) {
 
 function fetchDuration(url) {
 	return new Promise((resolve) => {
-		const proc = spawn('yt-dlp', ['--print', 'duration', '--no-playlist', '--quiet', url]);
+		const proc = spawn('yt-dlp', ytdlpArgs(['--print', 'duration', '--no-playlist', '--quiet', url]));
 		let out = '';
 		proc.stdout.on('data', d => (out += d));
 		proc.on('close', () => resolve(parseFloat(out.trim()) || 0));
@@ -238,7 +239,7 @@ function preloadAutoplaySuggestion(guildId, track, queue) {
 	const filePath = path.join(CACHE_DIR, `${guildId}_autoplay_${urlHash}.webm`);
 	const tmpPath = filePath + '.tmp';
 
-	const ytdlp = spawn('yt-dlp', ['-f', 'bestaudio', '-o', tmpPath, '--no-playlist', '--quiet', track.url]);
+	const ytdlp = spawn('yt-dlp', ytdlpArgs(['-f', 'bestaudio', '-o', tmpPath, '--no-playlist', '--quiet', track.url]));
 	queue.preloadAutoplayProcess = ytdlp;
 
 	ytdlp.on('close', (code) => {
@@ -398,7 +399,7 @@ function eagerPreloadTrack(guildId, track) {
 
 	const filePath = path.join(CACHE_DIR, `${guildId}_eager.webm`);
 	const tmpPath = filePath + '.tmp';
-	const ytdlp = spawn('yt-dlp', ['-f', 'bestaudio', '-o', tmpPath, '--no-playlist', '--quiet', track.url]);
+	const ytdlp = spawn('yt-dlp', ytdlpArgs(['-f', 'bestaudio', '-o', tmpPath, '--no-playlist', '--quiet', track.url]));
 	eagerPreloads.set(guildId, { process: ytdlp, filePath, url: track.url });
 
 	ytdlp.on('close', (code) => {

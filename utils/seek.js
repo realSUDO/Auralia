@@ -1,15 +1,16 @@
 const { spawn } = require("child_process");
+const { ytdlpArgs } = require("./ytdlp");
 
 /**
  * Get direct audio URL from yt-dlp
  */
 async function getDirectAudioUrl(videoUrl) {
 	return new Promise((resolve) => {
-		const proc = spawn('yt-dlp', [
+		const proc = spawn('yt-dlp', ytdlpArgs([
 			'--print', '%(url)s|||%(duration)s',
 			'-f', 'bestaudio',
 			'--no-playlist', '--quiet', videoUrl
-		]);
+		]));
 		let out = '';
 		proc.stdout.on('data', d => (out += d));
 		proc.on('close', () => {

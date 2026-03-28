@@ -10,6 +10,7 @@ const {
 const fs = require("fs");
 const { spawn } = require("child_process");
 const { getDirectAudioUrl, createSeekableStream } = require("../utils/seek");
+const { ytdlpArgs } = require("../utils/ytdlp");
 const { getSimilarTracks } = require("../utils/lastfm");
 const { updatePlayerUI, disablePlayerUI } = require("../utils/playerUI");
 const { cleanupPreload, isTrackPreloaded, preloadCurrentTrack, preloadNextTrack, preloadPreviousTrack, preloadAutoplaySuggestion } = require("../utils/preload");
@@ -587,13 +588,13 @@ async function startPlaying(guildId, client) {
 			return;
 		}
 
-		ytdlpProcess = spawn('yt-dlp', [
+		ytdlpProcess = spawn('yt-dlp', ytdlpArgs([
 			'-f', 'bestaudio',
 			'-o', '-',
 			'--quiet',
 			...(isLivestream ? [] : ['--no-playlist']),
 			track.url
-		]);
+		]));
 		stream = ytdlpProcess.stdout;
 		queue.currentStream = stream;
 		queue.playbackOffset = 0;

@@ -1,5 +1,6 @@
 const { spawn } = require("child_process");
 const { getMoodPlaylist, ALL_MOODS } = require("./mood");
+const { ytdlpArgs } = require("../utils/ytdlp");
 
 const SLOWED_REGEX = /slowed|reverb|lofi|lo-fi|sped up|nightcore|instrumental|karaoke|cover/i;
 
@@ -11,11 +12,11 @@ const SLOWED_REGEX = /slowed|reverb|lofi|lo-fi|sped up|nightcore|instrumental|ka
  */
 function scrapeYouTubeRD(videoId, excludeUrls) {
   return new Promise((resolve) => {
-    const proc = spawn("yt-dlp", [
+    const proc = spawn("yt-dlp", ytdlpArgs([
       "--flat-playlist", "--playlist-end", "7",
       "--print", "%(id)s|||%(title)s|||%(duration)s",
       `https://www.youtube.com/watch?v=${videoId}&list=RD${videoId}`,
-    ]);
+    ]));
 
     let out = "";
     proc.stdout.on("data", d => (out += d));
