@@ -59,7 +59,7 @@ function createNowPlayingEmbed(track, queue) {
 	
 	embed.addFields(
 		{ name: "Requested by", value: track.requester?.username || 'Unknown', inline: true },
-		{ name: "Queue", value: (queue.moodActive || queue.autoplay) ? '∞ song(s)' : `${Math.max(0, queue.tracks.length - 1) + (queue.autoplaySuggestion ? 1 : 0)} song(s)`, inline: true }
+		{ name: "Queue", value: `${Math.max(0, queue.tracks.length - 1) + (queue.autoplaySuggestion ? 1 : 0)} song(s)`, inline: true }
 	);
 	
 	if (queue.isPaused) {
