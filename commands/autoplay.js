@@ -1,5 +1,6 @@
 const { queueMap, triggerAutoplayFetch } = require("../player/musicPlayer");
 const { createSuccessEmbed, createErrorEmbed } = require("../utils/embeds");
+const { updatePlayerUI } = require("../utils/playerUI");
 
 function handleAutoplay(guildId, args, send) {
   const queue = queueMap.get(guildId);
@@ -9,8 +10,14 @@ function handleAutoplay(guildId, args, send) {
   const wantsOff = arg === "off";
 
   if (wantsOff) {
+    if (!queue.autoplay) return send({ embeds: [createErrorEmbed("Autoplay is already off.")] });
     queue.autoplay = false;
     queue.autoplaySuggestion = null;
+    queue.tracks = queue.tracks.filter((t, i) => i === 0 || !t.isAutoPlaySong);
+    // Edit existing player message to reflect new state — don't send a new one
+    if (queue.playerMessage && queue.currentTrack) {
+      updatePlayerUI(queue, queue.currentTrack, queue.textChannel).catch(() => {});
+    }
     return send({ embeds: [createSuccessEmbed("Autoplay disabled.")] });
   }
 
@@ -19,6 +26,10 @@ function handleAutoplay(guildId, args, send) {
   }
 
   queue.autoplay = true;
+  // Edit existing player message to reflect new state — don't send a new one
+  if (queue.playerMessage && queue.currentTrack) {
+    updatePlayerUI(queue, queue.currentTrack, queue.textChannel).catch(() => {});
+  }
   send({ embeds: [createSuccessEmbed("🎵 Autoplay enabled.")] });
 
   // Only fetch now if we're already on the last user-queued song

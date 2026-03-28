@@ -1047,7 +1047,8 @@ function triggerAutoplayFetch(guildId) {
 			queue.autoplaySuggestion = suggestion;
 			preloadAutoplaySuggestion(guildId, suggestion, queue);
 			console.log(`[Autoplay] Preloading suggestion: "${suggestion.title}"`);
-			if (queue.currentTrack) updatePlayerUI(queue, queue.currentTrack, queue.textChannel).catch(() => {});
+			// Only edit — never send a new player message from here
+			if (queue.currentTrack && queue.playerMessage) updatePlayerUI(queue, queue.currentTrack, queue.textChannel).catch(() => {});
 		}
 	}).catch(e => console.log(`[Autoplay] Fetch threw: ${e.message}`));
 }
