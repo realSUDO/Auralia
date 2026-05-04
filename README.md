@@ -11,46 +11,58 @@ A feature-rich Discord music bot with YouTube and Spotify support.
 - Auto-leave when alone in voice channel
 - Progress bar with auto-updates
 
-## Deployment on Render
+## Deployment on a VPS/VM
 
 ### Prerequisites
-1. Discord Bot Token
-2. Spotify Client ID and Secret
+- Ubuntu 24.04 VM (1GB RAM minimum)
+- Node.js 20, ffmpeg, docker.io, pipx
 
-### Steps
+### Setup
 
-1. **Fork/Clone this repository**
-
-2. **Create a new Web Service on Render**
-   - Connect your GitHub repository
-   - Select "Node" as the environment
-
-3. **Configure Build & Start Commands**
-   - Build Command: `npm install`
-   - Start Command: `npm start`
-
-4. **Add Environment Variables**
-   ```
-   DISCORD_TOKEN=your_discord_bot_token
-   PREFIX=!
-   SPOTIFY_CLIENT_ID=your_spotify_client_id
-   SPOTIFY_CLIENT_SECRET=your_spotify_client_secret
-   ```
-
-5. **Install System Dependencies**
-   Add this to your Render service settings under "Build Command":
+1. **Swap (required on 1GB VM)**
    ```bash
-   apt-get update && apt-get install -y ffmpeg python3 && npm install
+   sudo fallocate -l 1G /swapfile && sudo chmod 600 /swapfile
+   sudo mkswap /swapfile && sudo swapon /swapfile
+   echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
    ```
 
-6. **Deploy**
-   - Click "Create Web Service"
-   - Wait for deployment to complete
+2. **Install dependencies**
+   ```bash
+   curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+   sudo apt install -y nodejs ffmpeg docker.io
+   sudo systemctl enable --now docker
+   sudo apt install -y pipx && pipx install yt-dlp && pipx ensurepath
+   ```
 
-### Required System Packages
-- `ffmpeg` - For audio processing
-- `python3` - Required by yt-dlp
-- `yt-dlp` - Installed via npm (youtube-dl-exec)
+3. **YouTube bot detection fix (required for VPS IPs)**
+   ```bash
+   # Start PO Token provider
+   sudo docker run -d --name bgutil-pot -p 4416:4416 --restart always jim60105/bgutil-pot
+   # Install yt-dlp plugin
+   pip3 install --break-system-packages bgutil-ytdlp-pot-provider
+   ```
+
+4. **Clone and configure**
+   ```bash
+   git clone https://github.com/realSUDO/Auralia.git && cd Auralia
+   npm install
+   cp config.json.example config.json && nano config.json
+   ```
+
+5. **Run with PM2**
+   ```bash
+   sudo npm install -g pm2
+   pm2 start index.js --name auralia
+   pm2 save && pm2 startup
+   ```
+
+### config.json fields
+| Key | Where to get |
+|-----|-------------|
+| `token` | [Discord Developer Portal](https://discord.com/developers/applications) → Bot → Token |
+| `clientId` | Discord Developer Portal → General Information → Application ID |
+| `lastfmApiKey` | [last.fm/api](https://www.last.fm/api/account/create) |
+| `spotifyClientId` / `spotifyClientSecret` | [Spotify Dashboard](https://developer.spotify.com/dashboard) |
 
 ## Commands
 
